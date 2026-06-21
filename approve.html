@@ -64,6 +64,8 @@ function render(){
     </table>
     ${done?`<div class="msg ok">This expense is already <b>${exp.stage}</b>.</div>`:`
       <div class="amt"><span class="k" style="color:#6b6b70">Approved amount</span><input id="ed" type="number" step="0.01" value="${cur}"></div>
+      <label style="display:block;font-size:12px;color:#6b6b70;font-weight:600;margin:4px 0 4px">Comment (optional)</label>
+      <textarea id="cm" placeholder="Add a note${role==='Top Mgmt'?' — shown in the final summary email':''}" style="width:100%;font:inherit;padding:9px 11px;border:1px solid #d6dae1;border-radius:9px;min-height:54px;resize:vertical"></textarea>
       <div class="btns"><button class="ap" onclick="act('approve')">Approve</button><button class="rj" onclick="act('reject')">Reject</button></div>`}
     <div class="msg" id="msg"></div>
     <p class="muted">Approving advances to the next stage. The final approval posts the expense to Zoho Books automatically. <span class="save">DO NOT PRINT — SAVE PAPER.</span></p>`;
@@ -71,7 +73,8 @@ function render(){
 async function act(a){
   const m=document.getElementById('msg');m.className='msg';m.textContent='Working…';m.style.display='block';
   const ed=document.getElementById('ed');
-  const body={action:a,id:exp.id,by:role,editedAmount:ed?ed.value:undefined};
+  const cm=document.getElementById('cm');
+  const body={action:a,id:exp.id,by:role,editedAmount:ed?ed.value:undefined,comment:cm?cm.value:undefined};
   if(a==='reject'){body.reason=prompt('Reason for rejection (optional):')||'';}
   try{
     const r=await fetch('/api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
