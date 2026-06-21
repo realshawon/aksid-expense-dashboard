@@ -45,6 +45,34 @@ function effectiveAmount(row) {
 const APP_BASE = process.env.APP_BASE_URL || 'https://aksid-expense-dashboard.vercel.app';
 const LOGO = 'https://images.squarespace-cdn.com/content/v1/61b1d88771230e2244b14213/de522f80-4556-42c4-af20-e3687e746991/AKSID-HORIZONTAL-LOGO.png?format=750w';
 
+// Fixed approver mailboxes per stage (Manager comes from the submission). Overridable via env.
+const AUDIT_EMAIL = process.env.AUDIT_EMAIL || 'audit@aksidcorp.com';
+const ACCOUNTS_EMAIL = process.env.ACCOUNTS_EMAIL || 'accounts@aksidcorp.com';
+const TOPMGMT_EMAIL = process.env.TOPMGMT_EMAIL || 'saud@aksidcorp.com';
+const IT_EMAIL = process.env.IT_EMAIL || 'it@aksidcorp.com'; // monitoring — BCC only
+
+function approverEmail(expense, stage) {
+  if (stage === 'Manager') return expense.manager_email || '';
+  if (stage === 'Audit') return AUDIT_EMAIL;
+  if (stage === 'Accounts') return ACCOUNTS_EMAIL;
+  if (stage === 'Top Mgmt') return TOPMGMT_EMAIL;
+  return '';
+}
+function allParties(expense) {
+  return [expense.employee_email, expense.manager_email, AUDIT_EMAIL, ACCOUNTS_EMAIL, TOPMGMT_EMAIL];
+}
+// Dedupe + drop blanks, and never put IT in the visible To (IT is BCC only)
+function toList(arr) {
+  const seen = new Set(); const out = [];
+  for (const e of arr) {
+    const v = (e || '').trim();
+    const k = v.toLowerCase();
+    if (v && k !== IT_EMAIL.toLowerCase() && !seen.has(k)) { seen.add(k); out.push({ address: v }); }
+  }
+  return out;
+}
+const BCC_IT = [{ address: IT_EMAIL }];
+
 function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function money(n) { return '৳' + Math.round(Number(n || 0)).toLocaleString('en-US'); }
 
@@ -210,7 +238,7 @@ export default async function handler(req, res) {
       row.ref = ref;
       // notify (current approver = Manager)
       const em0 = stepEmail(row, 'Manager');
-      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'submitted', expense: row, stage: 'Manager', email_subject: em0.subject, email_html: em0.html });
+      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'submitted', expense: row, stage: 'Manager', to: toList([approverEmail(row, 'Manager')]), bcc: BCC_IT, email_subject: em0.subject, email_html: em0.html });
       return res.json({ ok: true, expense: row });
     }
 
@@ -262,7 +290,8 @@ export default async function handler(req, res) {
         }
       }
       const em = isFinal ? summaryEmail(updated) : stepEmail(updated, nextStage);
-      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: isFinal ? 'posted' : 'advanced', expense: updated, stage: nextStage, email_subject: em.subject, email_html: em.html });
+      const toRecipients = isFinal ? toList(allParties(updated)) : toList([approverEmail(updated, nextStage)]);
+      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: isFinal ? 'posted' : 'advanced', expense: updated, stage: nextStage, to: toRecipients, bcc: BCC_IT, email_subject: em.subject, email_html: em.html });
       return res.json({ ok: true, expense: updated });
     }
 
@@ -279,7 +308,7 @@ export default async function handler(req, res) {
       await sql`UPDATE expenses SET stage = 'Rejected', history = ${JSON.stringify(history)}::jsonb, updated_at = now() WHERE id = ${id}`;
       const updated = (await sql`SELECT * FROM expenses WHERE id = ${id}`)[0];
       const emR = rejectedEmail(updated);
-      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'rejected', expense: updated, stage: 'Rejected', email_subject: emR.subject, email_html: emR.html });
+      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'rejected', expense: updated, stage: 'Rejected', to: toList([updated.employee_email, updated.manager_email]), bcc: BCC_IT, email_subject: emR.subject, email_html: emR.html });
       return res.json({ ok: true, expense: updated });
     }
 
