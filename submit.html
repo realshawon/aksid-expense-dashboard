@@ -35,25 +35,39 @@ button{width:100%;font:inherit;font-weight:700;border:none;border-radius:10px;pa
     <label>Vendor Name</label><input id="vendor">
     <label>Description / Purpose</label><textarea id="description"></textarea>
     <div class="row"><div><label>Your Email</label><input id="employee_email" type="email"></div><div><label>Manager Email (approver)</label><input id="manager_email" type="email"></div></div>
-    <label>Receipt URL (optional)</label><input id="receipt_url" placeholder="link to the receipt">
-    <button onclick="submitExpense()">Submit for approval</button>
+    <label>Receipt / Document (upload)</label><input id="receipt_file" type="file" accept="image/*,.pdf,.heic,.png,.jpg,.jpeg">
+    <p class="muted" style="margin-top:4px">Auto-filed to OneDrive (renamed & sorted by department/date). Max 4 MB. Or paste a link below instead.</p>
+    <label>Receipt URL (optional, if no file)</label><input id="receipt_url" placeholder="link to the receipt">
+    <button id="sbtn" onclick="submitExpense()">Submit for approval</button>
     <div class="msg" id="msg"></div>
     <p class="muted">Goes to your Manager → Audit → Accounts → Top Management, then posts to Zoho. <span class="save">DO NOT PRINT — SAVE PAPER.</span></p>
   </div>
 </div>
 <script>
 const F=['employee_name','employee_id','cost_center','expense_date','amount','category','vendor','description','employee_email','manager_email','receipt_url'];
+function readFileB64(file){return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(String(fr.result).split(',')[1]);fr.onerror=rej;fr.readAsDataURL(file);});}
 async function submitExpense(){
-  const m=document.getElementById('msg');m.className='msg';m.style.display='block';m.textContent='Submitting…';
+  const m=document.getElementById('msg');const btn=document.getElementById('sbtn');
+  m.className='msg';m.style.display='block';m.textContent='Submitting…';btn.disabled=true;
   const body={action:'submit'};F.forEach(k=>body[k]=document.getElementById(k).value);
-  if(!body.employee_name||!body.amount){m.className='msg err';m.textContent='Please enter at least your name and the amount.';return;}
+  if(!body.employee_name||!body.amount){m.className='msg err';m.textContent='Please enter at least your name and the amount.';btn.disabled=false;return;}
+  const fi=document.getElementById('receipt_file');const file=fi&&fi.files&&fi.files[0];
   try{
+    if(file){
+      if(file.size>4*1024*1024){m.className='msg err';m.textContent='File is over 4 MB — please upload a smaller file.';btn.disabled=false;return;}
+      m.textContent='Uploading receipt…';
+      body.receipt_file=await readFileB64(file);
+      body.receipt_filename=file.name;
+      body.receipt_content_type=file.type||'application/octet-stream';
+    }
+    m.textContent='Submitting…';
     const r=await fetch('/api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const d=await r.json();
-    if(!d.ok){m.className='msg err';m.textContent=d.error||'Failed';return;}
-    m.className='msg ok';m.innerHTML='✅ Submitted as <b>'+d.expense.ref+'</b>. It is now with your Manager for approval.';
-    F.forEach(k=>document.getElementById(k).value='');
+    if(!d.ok){m.className='msg err';m.textContent=d.error||'Failed';btn.disabled=false;return;}
+    m.className='msg ok';m.innerHTML='✅ Submitted as <b>'+d.expense.ref+'</b>'+(d.expense.receipt_url?' with receipt filed':'')+'. It is now with your Manager for approval.';
+    F.forEach(k=>document.getElementById(k).value='');if(fi)fi.value='';
   }catch(e){m.className='msg err';m.textContent=String(e);}
+  btn.disabled=false;
 }
 </script>
 </body>
