@@ -44,7 +44,9 @@ function effectiveAmount(row) {
 
 const APP_BASE = process.env.APP_BASE_URL || 'https://aksid-expense-dashboard.vercel.app';
 function approveUrl(expense, stage) {
-  return APP_BASE + '/approve.html?id=' + expense.id + '&role=' + encodeURIComponent(stage || '');
+  const url = APP_BASE + '/approve.html?id=' + expense.id + '&role=' + encodeURIComponent(stage || '');
+  // Pre-built HTML button so the notification email shows a clickable button (the email body is HTML).
+  return '<a href="' + url + '" style="display:inline-block;padding:11px 22px;background:#2a6df4;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;font-family:Segoe UI,Arial,sans-serif">Review &amp; Approve</a>';
 }
 
 async function postWebhook(url, payload) {
