@@ -3,195 +3,137 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AKSID Expense — Status Dashboard</title>
+<title>AKSID Expense — Live Tracker</title>
 <link rel="icon" type="image/png" href="https://images.squarespace-cdn.com/content/v1/61b1d88771230e2244b14213/62e8dc56a1a91f59e7a98ea4/AKSID+Logo+White.png?format=100w">
-<link rel="shortcut icon" href="https://static1.squarespace.com/static/61b1d88771230e2244b14213/t/62e8dc56a1a91f59e7a98ea4/1659427926820/AKSID+Logo+White.png?format=100w">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js"></script>
 <style>
 :root{color-scheme:light}
 *{box-sizing:border-box}
 body{margin:0;font-family:'Segoe UI',system-ui,Arial,sans-serif;background:#f4f6f9;color:#1d1d1f;font-size:14px}
-.wrap{max-width:1040px;margin:0 auto;padding:18px}
+.wrap{max-width:1080px;margin:0 auto;padding:18px}
 .topbar{display:flex;align-items:center;gap:16px;margin-bottom:10px}
 .logo{height:46px;width:auto}
 .titlebox h1{font-size:20px;margin:0 0 2px}
 .sub{color:#6b6b70;font-size:12.5px;margin:0}
-.banner{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:12px;margin:14px 0 16px;border:1px solid #d9e6d9;background:#eef8ee}
+.banner{display:flex;align-items:center;gap:12px;padding:13px 16px;border-radius:12px;margin:14px 0 16px;border:1px solid #d9e6d9;background:#eef8ee}
+.banner.bad{background:#fdeced;border-color:#f3c2c5}
 .dot{width:12px;height:12px;border-radius:50%;background:#2e9d4f;flex:0 0 auto;box-shadow:0 0 0 4px rgba(46,157,79,.18)}
-.banner b{font-size:14.5px}
-.banner .meta{margin-left:auto;color:#6b6b70;font-size:12px;text-align:right}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-bottom:16px}
+.banner.bad .dot{background:#d23b46;box-shadow:0 0 0 4px rgba(210,59,70,.18)}
+.banner b{font-size:14.5px}.banner .meta{margin-left:auto;color:#6b6b70;font-size:12px;text-align:right}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px}
 .card{background:#fff;border:1px solid #e6e8ec;border-radius:12px;padding:14px 16px}
-.card .lbl{color:#6b6b70;font-size:12px;margin-bottom:6px}
-.card .val{font-size:22px;font-weight:700;letter-spacing:-.3px}
-.card .val.ok{color:#2e9d4f}
-.card .note{color:#9a9aa0;font-size:11.5px;margin-top:4px}
+.card .lbl{color:#6b6b70;font-size:12px;margin-bottom:6px}.card .val{font-size:22px;font-weight:700}
+.card .val.ok{color:#2e9d4f}.card .note{color:#9a9aa0;font-size:11.5px;margin-top:4px}
 .panel{background:#fff;border:1px solid #e6e8ec;border-radius:12px;padding:16px;margin-bottom:16px}
 .panel h2{font-size:14px;margin:0 0 12px;display:flex;align-items:center;gap:8px}
-.panel h2 .tag{font-size:10.5px;font-weight:700;color:#2a6df4;background:#eaf1ff;padding:2px 7px;border-radius:20px;letter-spacing:.3px}
-.panel h2 .tag.info{color:#8a6d00;background:#fff4d6}
+.panel h2 .tag{font-size:10.5px;font-weight:700;color:#2a6df4;background:#eaf1ff;padding:2px 7px;border-radius:20px}
 table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eef0f3;vertical-align:middle}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid #eef0f3;vertical-align:middle}
 th{color:#6b6b70;font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.4px}
-td.amt,th.amt{text-align:right}
+td.amt,th.amt{text-align:right;font-variant-numeric:tabular-nums}
 tr:last-child td{border-bottom:none}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-@media(max-width:760px){.grid2{grid-template-columns:1fr}}
-.chartbox{position:relative;height:240px}
-.muted{color:#6b6b70}
-.bar{height:8px;border-radius:6px;background:#2a6df4;display:inline-block;vertical-align:middle}
-.bartrk{background:#eef1f6;border-radius:6px;width:130px;display:inline-block;vertical-align:middle}
-.pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px}
-.pill.ok{color:#2e7d46;background:#e6f4ea}
-.pill.warn{color:#8a6d00;background:#fff4d6}
-.pill.cur{color:#1c52c0;background:#e7efff}
-.pill.done{color:#2e7d46;background:#e6f4ea}
-.flowrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px}
-.stage{font-size:12px;font-weight:600;background:#f1f3f7;border:1px solid #e2e6ec;border-radius:8px;padding:6px 10px}
-.arrow{color:#b6bcc6;font-weight:700}
 .steps{display:flex;align-items:center}
 .stp{width:12px;height:12px;border-radius:50%;background:#e2e6ec;flex:0 0 auto}
-.stp.done{background:#2e9d4f}
-.stp.cur{background:#2a6df4;box-shadow:0 0 0 3px rgba(42,109,244,.22)}
-.stpl{width:16px;height:2px;background:#e2e6ec;flex:0 0 auto}
-.stpl.done{background:#2e9d4f}
+.stp.done{background:#2e9d4f}.stp.cur{background:#2a6df4;box-shadow:0 0 0 3px rgba(42,109,244,.22)}
+.stp.rej{background:#d23b46}
+.stpl{width:16px;height:2px;background:#e2e6ec;flex:0 0 auto}.stpl.done{background:#2e9d4f}
 .avatar{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#eef1f6;color:#41506b;font-size:10.5px;font-weight:700;margin-right:8px;vertical-align:middle}
-.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11.5px;color:#6b6b70;margin-top:10px}
-.legend span{display:inline-flex;align-items:center;gap:5px}
-.lg{width:10px;height:10px;border-radius:50%;display:inline-block}
-.foot{color:#9a9aa0;font-size:11.5px;text-align:center;margin:6px 0 2px}
+.pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px}
+.pill.cur{color:#1c52c0;background:#e7efff}.pill.done{color:#2e7d46;background:#e6f4ea}.pill.rej{color:#a3242e;background:#fdeced}
+.muted{color:#6b6b70}.foot{color:#9a9aa0;font-size:11.5px;text-align:center;margin:6px 0 2px}
 .save{font-weight:700;color:#1d1d1f}
-.lock{font-size:11.5px;color:#8a6d00;background:#fff4d6;border:1px solid #f0e2b6;border-radius:8px;padding:8px 12px}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11.5px;color:#6b6b70;margin-top:10px}
+.legend span{display:inline-flex;align-items:center;gap:5px}.lg{width:10px;height:10px;border-radius:50%;display:inline-block}
+.empty{color:#9a9aa0;font-size:13px;padding:14px 4px}
+button.r{font:inherit;font-size:12px;border:1px solid #d6dae1;background:#fff;border-radius:8px;padding:5px 12px;cursor:pointer}
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="topbar">
     <img class="logo" src="https://images.squarespace-cdn.com/content/v1/61b1d88771230e2244b14213/de522f80-4556-42c4-af20-e3687e746991/AKSID-HORIZONTAL-LOGO.png?format=750w" alt="AKSID Corporation Limited">
-    <div class="titlebox">
-      <h1>Expense — Status Dashboard</h1>
-      <p class="sub">AKSID Corporation Limited · expense automation health &amp; activity overview</p>
-    </div>
+    <div class="titlebox"><h1>Expense — Live Tracker</h1><p class="sub">AKSID Corporation Limited · who submitted, who it's with, what stage · live</p></div>
   </div>
 
-  <div class="lock">🔒 Public overview — employee names are shown as initials and exact amounts are hidden. Full detail is in the internal dashboard.</div>
-
-  <div class="banner">
-    <span class="dot"></span>
-    <div><b>System operational — all OK</b><div class="muted" style="font-size:12px">Submission, notifications and accounting connection are healthy</div></div>
-    <div class="meta">Status as of<br><span id="asof"></span></div>
+  <div id="banner" class="banner"><span class="dot"></span>
+    <div><b id="bTitle">Loading…</b><div class="muted" id="bSub" style="font-size:12px">Reading the live database</div></div>
+    <div class="meta" id="bMeta"></div>
   </div>
 
   <div class="cards">
-    <div class="card"><div class="lbl">In approval now</div><div class="val" id="kpiOpen">—</div><div class="note">awaiting an approver</div></div>
-    <div class="card"><div class="lbl">Posted to Zoho</div><div class="val" id="kpiPosted">—</div><div class="note">fully approved &amp; recorded</div></div>
-    <div class="card"><div class="lbl">Petty cash funding</div><div class="val ok">Healthy</div><div class="note">Within working range</div></div>
-    <div class="card"><div class="lbl">Last activity</div><div class="val" id="kpiLast" style="font-size:18px">—</div><div class="note">most recent entry</div></div>
+    <div class="card"><div class="lbl">In approval now</div><div class="val" id="kOpen">—</div><div class="note">awaiting an approver</div></div>
+    <div class="card"><div class="lbl">Posted to Zoho</div><div class="val" id="kPosted">—</div><div class="note">fully approved &amp; recorded</div></div>
+    <div class="card"><div class="lbl">Rejected</div><div class="val" id="kRej">—</div><div class="note">sent back</div></div>
+    <div class="card"><div class="lbl">Total submissions</div><div class="val" id="kTotal">—</div><div class="note">in the system</div></div>
   </div>
 
   <div class="panel">
-    <h2>Submission &amp; approval tracker <span class="tag">Per submission</span></h2>
-    <div id="trackWrap"></div>
+    <h2>Submission &amp; approval tracker <span class="tag">Live</span> <button class="r" onclick="load()" style="margin-left:auto">↻ Refresh</button></h2>
+    <div id="trackWrap"><div class="empty">Loading…</div></div>
     <div class="legend">
       <span><span class="lg" style="background:#2e9d4f"></span>Approved / passed</span>
       <span><span class="lg" style="background:#2a6df4"></span>Currently here</span>
       <span><span class="lg" style="background:#e2e6ec"></span>Not yet reached</span>
-      <span class="muted">Stages: Submitted → Manager → Audit → Accounts → Top Mgmt → Posted</span>
+      <span><span class="lg" style="background:#d23b46"></span>Rejected</span>
+      <span class="muted">Submitted → Manager → Audit → Accounts → Top Mgmt → Posted</span>
     </div>
-    <p class="muted" style="font-size:11.5px;margin:10px 0 0">Shows where each expense is and who it's with. Representative entries until the live stage-record is connected; then every real submission appears here automatically.</p>
-  </div>
-
-  <div class="grid2">
-    <div class="panel"><h2>Spend distribution by month <span class="tag">Relative</span></h2><div class="chartbox"><canvas id="chartMonth"></canvas></div></div>
-    <div class="panel"><h2>Spend share by account <span class="tag">Relative</span></h2><div class="chartbox"><canvas id="chartAccount"></canvas></div></div>
-  </div>
-
-  <div class="panel"><h2>Recent petty cash activity (Head Office) <span class="tag">Relative</span></h2><div id="recentWrap"></div>
-    <p class="muted" style="font-size:11.5px;margin:10px 0 0">Live from Zoho Books. Bars show each entry's relative size; exact BDT amounts are hidden in this public view.</p>
-  </div>
-
-  <div class="panel">
-    <h2>Pipeline &amp; system health <span class="tag info">Status</span></h2>
-    <table>
-      <tr><td>Submission &amp; notify automation (Make)</td><td class="amt"><span class="pill ok">Active</span></td></tr>
-      <tr><td>New-submission Email + WhatsApp alerts</td><td class="amt"><span class="pill ok">On</span></td></tr>
-      <tr><td>Zoho Books accounting connection</td><td class="amt"><span class="pill ok">Live</span></td></tr>
-      <tr><td>Live stage-record feeding this tracker</td><td class="amt"><span class="pill warn">Pending setup</span></td></tr>
-    </table>
   </div>
 
   <p class="foot"><span class="save">DO NOT PRINT — SAVE PAPER.</span></p>
 </div>
 
 <script>
-const ASOF='21 Jun 2026';
-document.getElementById('asof').textContent=ASOF;
-
-const STAGES=['Submitted','Manager','Audit','Accounts','Top Mgmt','Posted'];
-const WITHWHOM=['Awaiting Manager','Manager','Audit team','Accounts','Top Management','Done · in Zoho'];
-
-// Representative submissions (initials masked). stage = index into STAGES (current position).
-const TRACK=[
-  {id:'EXP-014', who:'Z.M.H.', dept:'Marketing', cat:'ID Card Lamination', stage:1},
-  {id:'EXP-013', who:'P.M.',   dept:'Engineering', cat:'Fuel, toll & parking', stage:3},
-  {id:'EXP-012', who:'A.K.',   dept:'Logistics', cat:'IOU / advance', stage:4},
-  {id:'EXP-011', who:'S.H.',   dept:'Marketing', cat:'Food / refreshment', stage:2},
-  {id:'EXP-010', who:'M.R.',   dept:'Head Office', cat:'Labour bill', stage:5}
-];
+const ORDER=['Submitted','Manager','Audit','Accounts','Top Mgmt','Posted'];
+const WITH={Manager:'Manager',Audit:'Audit team',Accounts:'Accounts','Top Mgmt':'Top Management',Posted:'Done · in Zoho',Rejected:'Rejected'};
+const initials=n=>(n||'?').split(/\s+/).map(w=>w[0]).join('').slice(0,3).toUpperCase();
 
 function stepper(stage){
-  let h='<div class="steps">';
-  for(let i=0;i<STAGES.length;i++){
-    const cls = i<stage?'done':(i===stage?'cur':'');
-    h+=`<span class="stp ${cls}" title="${STAGES[i]}"></span>`;
-    if(i<STAGES.length-1){h+=`<span class="stpl ${i<stage?'done':''}"></span>`;}
+  if(stage==='Rejected'){
+    let h='<div class="steps">';
+    for(let i=0;i<ORDER.length;i++){h+=`<span class="stp ${i===0?'done':'rej'}"></span>`+(i<ORDER.length-1?'<span class="stpl"></span>':'');}
+    return h+'</div>';
+  }
+  const cur=ORDER.indexOf(stage); let h='<div class="steps">';
+  for(let i=0;i<ORDER.length;i++){
+    const cls=i<cur?'done':(i===cur?(stage==='Posted'?'done':'cur'):'');
+    h+=`<span class="stp ${cls}"></span>`+(i<ORDER.length-1?`<span class="stpl ${i<cur?'done':''}"></span>`:'');
   }
   return h+'</div>';
 }
 function withPill(stage){
-  if(stage>=5) return `<span class="pill done">${WITHWHOM[5]}</span>`;
-  return `<span class="pill cur">${WITHWHOM[stage]}</span>`;
+  if(stage==='Posted')return '<span class="pill done">'+WITH.Posted+'</span>';
+  if(stage==='Rejected')return '<span class="pill rej">Rejected</span>';
+  return '<span class="pill cur">'+(WITH[stage]||stage)+'</span>';
+}
+function setBanner(ok,msg){
+  const b=document.getElementById('banner');
+  if(ok){b.className='banner';document.getElementById('bTitle').textContent='System operational — all OK';document.getElementById('bSub').textContent='Live data connection is healthy';}
+  else{b.className='banner bad';document.getElementById('bTitle').textContent='Database not connected yet';document.getElementById('bSub').textContent=msg||'Connect Neon and run /api?action=init';}
+  document.getElementById('bMeta').innerHTML='Last refreshed<br>'+new Date().toLocaleString();
 }
 
-document.getElementById('trackWrap').innerHTML='<table><thead><tr><th>ID</th><th>Submitter</th><th>Dept</th><th>Category</th><th>Stage</th><th>Currently with</th></tr></thead><tbody>'+
-  TRACK.map(t=>`<tr>
-    <td>${t.id}</td>
-    <td><span class="avatar">${t.who.replace(/[^A-Z]/g,'').slice(0,3)}</span>${t.who}</td>
-    <td>${t.dept}</td>
-    <td>${t.cat}</td>
-    <td>${stepper(t.stage)}</td>
-    <td>${withPill(t.stage)}</td></tr>`).join('')+'</tbody></table>';
-
-document.getElementById('kpiOpen').textContent=TRACK.filter(t=>t.stage<5).length;
-document.getElementById('kpiPosted').textContent=TRACK.filter(t=>t.stage>=5).length;
-document.getElementById('kpiLast').textContent='22 Apr 2026';
-
-// Recent petty cash (Zoho) — relative bars only
-const ACTIVITY=[
-  {date:'22 Apr 2026', ref:'test', amt:95800},
-  {date:'22 Apr 2026', ref:'test', amt:8645},
-  {date:'22 Apr 2026', ref:'Test', amt:7000},
-  {date:'08 Apr 2026', ref:'Fuel, toll and parking', amt:5000},
-  {date:'07 Apr 2026', ref:'Paid for labour bill', amt:25800},
-  {date:'07 Apr 2026', ref:'IOU for purchase', amt:50000},
-  {date:'07 Apr 2026', ref:'Paid for food bill', amt:625}
-];
-const maxAmt=Math.max.apply(null,ACTIVITY.map(a=>a.amt));
-document.getElementById('recentWrap').innerHTML='<table><thead><tr><th>Date</th><th>Reference / purpose</th><th>Relative size</th></tr></thead><tbody>'+
-  ACTIVITY.map(a=>{const pct=Math.max(5,Math.round(a.amt/maxAmt*100));
-    return `<tr><td>${a.date}</td><td>${a.ref}</td><td><span class="bartrk"><span class="bar" style="width:${pct}%"></span></span></td></tr>`;}).join('')+'</tbody></table>';
-
-const MONTHS=[{m:'Feb 26',pct:6},{m:'Apr 26',pct:100}];
-const ACCOUNTS=[{a:'Labour bill',pct:27},{a:'IOU / advance',pct:52},{a:'Fuel / toll / parking',pct:6},{a:'Food / entertainment',pct:1},{a:'Other / misc',pct:14}];
-new Chart(document.getElementById('chartMonth'),{type:'bar',
-  data:{labels:MONTHS.map(x=>x.m),datasets:[{data:MONTHS.map(x=>x.pct),backgroundColor:'#2a6df4',borderRadius:6,maxBarThickness:60}]},
-  options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw+'% of period'}}},
-    scales:{y:{display:false},x:{grid:{display:false}}}}});
-const palette=['#2a6df4','#2e9d4f','#f0a500','#d23b46','#7a5af5','#00a3a3'];
-new Chart(document.getElementById('chartAccount'),{type:'doughnut',
-  data:{labels:ACCOUNTS.map(x=>x.a),datasets:[{data:ACCOUNTS.map(x=>x.pct),backgroundColor:palette,borderWidth:2,borderColor:'#fff'}]},
-  options:{responsive:true,maintainAspectRatio:false,cutout:'58%',
-    plugins:{legend:{position:'right',labels:{boxWidth:11,font:{size:11}}},tooltip:{callbacks:{label:c=>c.label+': '+c.raw+'%'}}}}});
+async function load(){
+  try{
+    const r=await fetch('/api?action=list',{cache:'no-store'});
+    const d=await r.json();
+    if(!d.ok){setBanner(false,d.error);document.getElementById('trackWrap').innerHTML='<div class="empty">'+(d.error||'Not ready')+'</div>';return;}
+    setBanner(true);
+    const ex=d.expenses||[];
+    document.getElementById('kTotal').textContent=ex.length;
+    document.getElementById('kOpen').textContent=ex.filter(e=>['Manager','Audit','Accounts','Top Mgmt'].includes(e.stage)).length;
+    document.getElementById('kPosted').textContent=ex.filter(e=>e.stage==='Posted').length;
+    document.getElementById('kRej').textContent=ex.filter(e=>e.stage==='Rejected').length;
+    if(!ex.length){document.getElementById('trackWrap').innerHTML='<div class="empty">No submissions yet. New expenses will appear here automatically.</div>';return;}
+    document.getElementById('trackWrap').innerHTML='<table><thead><tr><th>Ref</th><th>Submitter</th><th>Dept</th><th>Category</th><th>Stage</th><th>Currently with</th></tr></thead><tbody>'+
+      ex.map(e=>`<tr>
+        <td>${e.ref||('#'+e.id)}</td>
+        <td><span class="avatar">${initials(e.employee_name)}</span>${e.employee_name||'—'}</td>
+        <td>${e.cost_center||'—'}</td>
+        <td>${e.category||'—'}</td>
+        <td>${stepper(e.stage)}</td>
+        <td>${withPill(e.stage)}</td></tr>`).join('')+'</tbody></table>';
+  }catch(err){setBanner(false,String(err));}
+}
+load();
 </script>
 </body>
 </html>

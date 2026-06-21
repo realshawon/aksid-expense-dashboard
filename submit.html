@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AKSID Expense — Submit</title>
+<link rel="icon" type="image/png" href="https://images.squarespace-cdn.com/content/v1/61b1d88771230e2244b14213/62e8dc56a1a91f59e7a98ea4/AKSID+Logo+White.png?format=100w">
+<style>
+:root{color-scheme:light}*{box-sizing:border-box}
+body{margin:0;font-family:'Segoe UI',system-ui,Arial,sans-serif;background:#f4f6f9;color:#1d1d1f;font-size:14px}
+.wrap{max-width:560px;margin:0 auto;padding:20px}
+.logo{height:40px;margin-bottom:14px}
+.card{background:#fff;border:1px solid #e6e8ec;border-radius:14px;padding:20px}
+h1{font-size:18px;margin:0 0 2px}.sub{color:#6b6b70;font-size:12.5px;margin:0 0 16px}
+label{display:block;font-size:12px;color:#6b6b70;font-weight:600;margin:12px 0 4px}
+input,textarea,select{width:100%;font:inherit;padding:9px 11px;border:1px solid #d6dae1;border-radius:9px;background:#fff}
+textarea{min-height:64px;resize:vertical}
+.row{display:flex;gap:12px}.row>div{flex:1}
+button{width:100%;font:inherit;font-weight:700;border:none;border-radius:10px;padding:13px;cursor:pointer;background:#2a6df4;color:#fff;margin-top:18px}
+.msg{margin-top:16px;padding:12px 14px;border-radius:10px;font-size:13.5px;display:none}
+.msg.ok{background:#e6f4ea;color:#226b39;display:block}.msg.err{background:#fdeced;color:#a3242e;display:block}
+.muted{color:#9a9aa0;font-size:11.5px;margin-top:14px}.save{font-weight:700;color:#1d1d1f}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <img class="logo" src="https://images.squarespace-cdn.com/content/v1/61b1d88771230e2244b14213/de522f80-4556-42c4-af20-e3687e746991/AKSID-HORIZONTAL-LOGO.png?format=750w" alt="AKSID">
+  <div class="card">
+    <h1>Submit an Expense</h1>
+    <p class="sub">AKSID Corporation Limited · petty cash claim</p>
+    <div class="row"><div><label>Employee Name</label><input id="employee_name"></div><div><label>Employee ID</label><input id="employee_id"></div></div>
+    <label>Cost Center / Department</label><input id="cost_center" placeholder="e.g. Marketing and Brand Department">
+    <div class="row"><div><label>Expense Date</label><input id="expense_date" type="date"></div><div><label>Amount (BDT)</label><input id="amount" type="number" step="0.01"></div></div>
+    <label>Expense Category</label><input id="category" placeholder="e.g. ID Card Lamination, Fuel, Stationery">
+    <label>Vendor Name</label><input id="vendor">
+    <label>Description / Purpose</label><textarea id="description"></textarea>
+    <div class="row"><div><label>Your Email</label><input id="employee_email" type="email"></div><div><label>Manager Email (approver)</label><input id="manager_email" type="email"></div></div>
+    <label>Receipt URL (optional)</label><input id="receipt_url" placeholder="link to the receipt">
+    <button onclick="submitExpense()">Submit for approval</button>
+    <div class="msg" id="msg"></div>
+    <p class="muted">Goes to your Manager → Audit → Accounts → Top Management, then posts to Zoho. <span class="save">DO NOT PRINT — SAVE PAPER.</span></p>
+  </div>
+</div>
+<script>
+const F=['employee_name','employee_id','cost_center','expense_date','amount','category','vendor','description','employee_email','manager_email','receipt_url'];
+async function submitExpense(){
+  const m=document.getElementById('msg');m.className='msg';m.style.display='block';m.textContent='Submitting…';
+  const body={action:'submit'};F.forEach(k=>body[k]=document.getElementById(k).value);
+  if(!body.employee_name||!body.amount){m.className='msg err';m.textContent='Please enter at least your name and the amount.';return;}
+  try{
+    const r=await fetch('/api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();
+    if(!d.ok){m.className='msg err';m.textContent=d.error||'Failed';return;}
+    m.className='msg ok';m.innerHTML='✅ Submitted as <b>'+d.expense.ref+'</b>. It is now with your Manager for approval.';
+    F.forEach(k=>document.getElementById(k).value='');
+  }catch(e){m.className='msg err';m.textContent=String(e);}
+}
+</script>
+</body>
+</html>
