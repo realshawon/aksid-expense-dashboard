@@ -43,10 +43,111 @@ function effectiveAmount(row) {
 }
 
 const APP_BASE = process.env.APP_BASE_URL || 'https://aksid-expense-dashboard.vercel.app';
-function approveUrl(expense, stage) {
-  const url = APP_BASE + '/approve.html?id=' + expense.id + '&role=' + encodeURIComponent(stage || '');
-  // Pre-built HTML button so the notification email shows a clickable button (the email body is HTML).
-  return '<a href="' + url + '" style="display:inline-block;padding:11px 22px;background:#2a6df4;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;font-family:Segoe UI,Arial,sans-serif">Review &amp; Approve</a>';
+const LOGO = 'https://images.squarespace-cdn.com/content/v1/61b1d88771230e2244b14213/de522f80-4556-42c4-af20-e3687e746991/AKSID-HORIZONTAL-LOGO.png?format=750w';
+
+function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function money(n) { return '৳' + Math.round(Number(n || 0)).toLocaleString('en-US'); }
+
+function approveUrlRaw(expense, stage) {
+  return APP_BASE + '/approve.html?id=' + expense.id + '&role=' + encodeURIComponent(stage || '');
+}
+function approveButton(expense, stage) {
+  const url = approveUrlRaw(expense, stage);
+  return '<a href="' + url + '" style="display:inline-block;padding:12px 26px;background:#2a6df4;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;font-family:Segoe UI,Arial,sans-serif;font-size:15px">Review &amp; Approve</a>';
+}
+function receiptLink(url) {
+  if (!url) return '—';
+  return '<a href="' + esc(url) + '" style="color:#2a6df4;text-decoration:underline;font-weight:700">Open Receipt ↗</a>';
+}
+function row(label, value, bold) {
+  return '<tr><td style="padding:5px 14px 5px 0;color:#6b7280;font-size:13px;white-space:nowrap;vertical-align:top">' + esc(label) + '</td>'
+    + '<td style="padding:5px 0;font-size:13px;color:#111827;' + (bold ? 'font-weight:700' : '') + '">' + value + '</td></tr>';
+}
+function detailRows(e, finalAmount) {
+  const amt = (finalAmount != null) ? finalAmount : effectiveAmount(e);
+  return row('Employee', esc(e.employee_name) + (e.employee_id ? (' · ID ' + esc(e.employee_id)) : ''))
+    + row('Cost Center', esc(e.cost_center))
+    + row('Date', e.expense_date ? String(e.expense_date).slice(0, 10) : '—')
+    + row('Category', esc(e.category))
+    + row('Vendor', esc(e.vendor), true)
+    + row('Description', esc(e.description), true)
+    + row('Amount', money(amt), true);
+}
+function emailHead() {
+  return '<div style="font-family:Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;color:#111827">'
+    + '<img src="' + LOGO + '" alt="AKSID" style="height:32px;margin:0 0 16px">';
+}
+function emailFoot() {
+  return '<p style="margin:18px 0 0;font-size:11px;color:#9ca3af"><b style="color:#111827">DO NOT PRINT — SAVE PAPER.</b></p></div>';
+}
+function lastComment(e) {
+  const h = Array.isArray(e.history) ? e.history : [];
+  for (let i = h.length - 1; i >= 0; i--) { if (h[i] && h[i].comment) return h[i].comment; }
+  return '';
+}
+function approvalTrail(e) {
+  const h = Array.isArray(e.history) ? e.history : [];
+  const appr = h.filter(x => x.action === 'approved');
+  if (!appr.length) return '<div style="font-size:12.5px;color:#9ca3af">—</div>';
+  return appr.map(x => '<div style="font-size:12.5px;color:#111827;margin:3px 0">✓ <b>' + esc(x.stage) + '</b> '
+    + money(x.amount) + (x.by ? ' <span style="color:#9ca3af">· ' + esc(x.by) + '</span>' : '')
+    + (x.comment ? ' <span style="color:#6b7280">— “' + esc(x.comment) + '”</span>' : '') + '</div>').join('');
+}
+function sectionLabel(t) {
+  return '<p style="font-size:11px;color:#6b7280;margin:14px 0 4px;font-weight:700;text-transform:uppercase;letter-spacing:.05em">' + t + '</p>';
+}
+
+// Compact email at each approval step (with the action button)
+function stepEmail(e, stage) {
+  const html = emailHead()
+    + '<p style="font-size:15px;margin:0 0 2px"><b>Expense ' + esc(e.ref) + '</b> needs your approval.</p>'
+    + '<p style="font-size:13px;color:#6b7280;margin:0 0 14px">Currently with: <b style="color:#2a6df4">' + esc(stage) + '</b></p>'
+    + '<table style="border-collapse:collapse;margin:0 0 16px">' + detailRows(e)
+    + (e.receipt_url ? row('Receipt', receiptLink(e.receipt_url)) : '') + '</table>'
+    + '<p style="margin:0">' + approveButton(e, stage) + '</p>'
+    + emailFoot();
+  return { subject: 'AKSID Expense ' + e.ref + ' — ' + stage, html };
+}
+
+// Final summary email to everyone after Top Management approval + Zoho posting
+function summaryEmail(e) {
+  const orig = Number(e.amount);
+  const fin = effectiveAmount(e);
+  const edited = (e.edited_amount != null && Number(e.edited_amount) !== orig);
+  const comment = lastComment(e);
+  const amtCell = money(fin) + (edited ? ' <span style="color:#9ca3af;font-weight:400">(original ' + money(orig) + ')</span>' : '');
+  const rows = row('Employee', esc(e.employee_name) + (e.employee_id ? (' · ID ' + esc(e.employee_id)) : ''))
+    + row('Cost Center', esc(e.cost_center))
+    + row('Date', e.expense_date ? String(e.expense_date).slice(0, 10) : '—')
+    + row('Category', esc(e.category))
+    + row('Vendor', esc(e.vendor), true)
+    + row('Description', esc(e.description), true)
+    + row('Amount', amtCell, true)
+    + (e.receipt_url ? row('Receipt', receiptLink(e.receipt_url)) : '');
+  const html = emailHead()
+    + '<p style="font-size:17px;font-weight:700;margin:0 0 2px">Expense Approval Summary</p>'
+    + '<p style="font-size:13px;color:#16a34a;font-weight:700;margin:0 0 14px">✅ Approved by all · posted to Zoho Books · ' + esc(e.ref) + '</p>'
+    + '<table style="border-collapse:collapse;margin:0 0 8px">' + rows + '</table>'
+    + sectionLabel('Approval Trail') + approvalTrail(e)
+    + (comment ? sectionLabel('Top Management Comment') + '<p style="font-size:13px;color:#111827;margin:0;padding:9px 13px;background:#f3f4f6;border-radius:8px">' + esc(comment) + '</p>' : '')
+    + emailFoot();
+  return { subject: 'Expense Approval Summary — ' + e.ref + (e.vendor ? ' (' + e.vendor + ')' : ''), html };
+}
+
+function rejectedEmail(e) {
+  const h = Array.isArray(e.history) ? e.history : [];
+  const last = h[h.length - 1] || {};
+  const html = emailHead()
+    + '<p style="font-size:15px;color:#b91c1c;font-weight:700;margin:0 0 10px">Expense ' + esc(e.ref) + ' was rejected</p>'
+    + '<table style="border-collapse:collapse;margin:0 0 14px">'
+    + row('Employee', esc(e.employee_name))
+    + row('Vendor', esc(e.vendor), true)
+    + row('Description', esc(e.description), true)
+    + row('Amount', money(effectiveAmount(e)), true)
+    + row('Rejected by', esc(last.by || '—'))
+    + (last.reason ? row('Reason', esc(last.reason)) : '') + '</table>'
+    + emailFoot();
+  return { subject: 'AKSID Expense ' + e.ref + ' — Rejected', html };
 }
 
 async function postWebhook(url, payload) {
@@ -108,7 +209,8 @@ export default async function handler(req, res) {
       await sql`UPDATE expenses SET ref = ${ref} WHERE id = ${row.id}`;
       row.ref = ref;
       // notify (current approver = Manager)
-      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'submitted', expense: row, stage: 'Manager', approve_url: approveUrl(row, 'Manager') });
+      const em0 = stepEmail(row, 'Manager');
+      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'submitted', expense: row, stage: 'Manager', email_subject: em0.subject, email_html: em0.html });
       return res.json({ ok: true, expense: row });
     }
 
@@ -131,8 +233,9 @@ export default async function handler(req, res) {
       const isFinal = idx === STAGES.length - 1;
       const nextStage = isFinal ? 'Posted' : STAGES[idx + 1];
 
+      const comment = (body.comment != null && String(body.comment).trim() !== '') ? String(body.comment).trim() : undefined;
       const history = Array.isArray(row.history) ? row.history : [];
-      history.push({ stage: row.stage, action: 'approved', by, at: new Date().toISOString(), amount: (edited != null ? Number(edited) : Number(row.amount)) });
+      history.push({ stage: row.stage, action: 'approved', by, at: new Date().toISOString(), amount: (edited != null ? Number(edited) : Number(row.amount)), comment });
 
       await sql`UPDATE expenses
         SET stage = ${nextStage}, edited_amount = ${edited}, history = ${JSON.stringify(history)}::jsonb, updated_at = now()
@@ -158,7 +261,8 @@ export default async function handler(req, res) {
           updated.zoho_posted = true;
         }
       }
-      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: isFinal ? 'posted' : 'advanced', expense: updated, stage: nextStage, approve_url: approveUrl(updated, nextStage) });
+      const em = isFinal ? summaryEmail(updated) : stepEmail(updated, nextStage);
+      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: isFinal ? 'posted' : 'advanced', expense: updated, stage: nextStage, email_subject: em.subject, email_html: em.html });
       return res.json({ ok: true, expense: updated });
     }
 
@@ -174,7 +278,8 @@ export default async function handler(req, res) {
       history.push({ stage: row.stage, action: 'rejected', by, at: new Date().toISOString(), reason });
       await sql`UPDATE expenses SET stage = 'Rejected', history = ${JSON.stringify(history)}::jsonb, updated_at = now() WHERE id = ${id}`;
       const updated = (await sql`SELECT * FROM expenses WHERE id = ${id}`)[0];
-      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'rejected', expense: updated, stage: 'Rejected', approve_url: approveUrl(updated, 'Rejected') });
+      const emR = rejectedEmail(updated);
+      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'rejected', expense: updated, stage: 'Rejected', email_subject: emR.subject, email_html: emR.html });
       return res.json({ ok: true, expense: updated });
     }
 
