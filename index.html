@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AKSID Expense — Status Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js"></script>
+<style>
+:root{color-scheme:light}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Segoe UI',system-ui,Arial,sans-serif;background:#f4f6f9;color:#1d1d1f;font-size:14px}
+.wrap{max-width:1040px;margin:0 auto;padding:18px}
+h1{font-size:20px;margin:0 0 2px}
+.sub{color:#6b6b70;font-size:12.5px;margin:0 0 14px}
+.banner{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:12px;margin-bottom:16px;border:1px solid #d9e6d9;background:#eef8ee}
+.dot{width:12px;height:12px;border-radius:50%;background:#2e9d4f;flex:0 0 auto;box-shadow:0 0 0 4px rgba(46,157,79,.18)}
+.banner b{font-size:14.5px}
+.banner .meta{margin-left:auto;color:#6b6b70;font-size:12px;text-align:right}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-bottom:16px}
+.card{background:#fff;border:1px solid #e6e8ec;border-radius:12px;padding:14px 16px}
+.card .lbl{color:#6b6b70;font-size:12px;margin-bottom:6px}
+.card .val{font-size:22px;font-weight:700;letter-spacing:-.3px}
+.card .val.ok{color:#2e9d4f}
+.card .note{color:#9a9aa0;font-size:11.5px;margin-top:4px}
+.panel{background:#fff;border:1px solid #e6e8ec;border-radius:12px;padding:16px;margin-bottom:16px}
+.panel h2{font-size:14px;margin:0 0 12px;display:flex;align-items:center;gap:8px}
+.panel h2 .tag{font-size:10.5px;font-weight:700;color:#2a6df4;background:#eaf1ff;padding:2px 7px;border-radius:20px;letter-spacing:.3px}
+.panel h2 .tag.info{color:#8a6d00;background:#fff4d6}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eef0f3}
+th{color:#6b6b70;font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.4px}
+td.amt,th.amt{text-align:right}
+tr:last-child td{border-bottom:none}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:760px){.grid2{grid-template-columns:1fr}}
+.chartbox{position:relative;height:240px}
+.muted{color:#6b6b70}
+.bar{height:8px;border-radius:6px;background:#2a6df4;display:inline-block;vertical-align:middle}
+.bartrk{background:#eef1f6;border-radius:6px;width:120px;display:inline-block;vertical-align:middle}
+.pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px}
+.pill.ok{color:#2e7d46;background:#e6f4ea}
+.pill.warn{color:#8a6d00;background:#fff4d6}
+.flowrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px}
+.stage{font-size:12px;font-weight:600;background:#f1f3f7;border:1px solid #e2e6ec;border-radius:8px;padding:6px 10px}
+.arrow{color:#b6bcc6;font-weight:700}
+.foot{color:#9a9aa0;font-size:11.5px;text-align:center;margin:6px 0 2px}
+.save{font-weight:700;color:#1d1d1f}
+.lock{font-size:11.5px;color:#8a6d00;background:#fff4d6;border:1px solid #f0e2b6;border-radius:8px;padding:8px 12px;margin-bottom:16px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>AKSID Expense — Status Dashboard</h1>
+  <p class="sub">AKSID Corporation Limited · expense automation health &amp; activity overview</p>
+
+  <div class="lock">🔒 Public overview — exact balances and amounts are hidden. Full figures are in the internal dashboard only.</div>
+
+  <div class="banner">
+    <span class="dot"></span>
+    <div><b>System operational — all OK</b><div class="muted" style="font-size:12px">Submission, notifications and accounting connection are healthy</div></div>
+    <div class="meta">Status as of<br><span id="asof"></span></div>
+  </div>
+
+  <div class="cards">
+    <div class="card"><div class="lbl">System status</div><div class="val ok">Operational</div><div class="note">Submit → approve → record</div></div>
+    <div class="card"><div class="lbl">Petty cash funding</div><div class="val ok">Healthy</div><div class="note">Within working range</div></div>
+    <div class="card"><div class="lbl">Postings tracked</div><div class="val" id="kpiCount">4</div><div class="note">in Zoho Books</div></div>
+    <div class="card"><div class="lbl">Last activity</div><div class="val" id="kpiLast" style="font-size:18px">—</div><div class="note">most recent posting</div></div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel"><h2>Spend distribution by month <span class="tag">Relative</span></h2><div class="chartbox"><canvas id="chartMonth"></canvas></div></div>
+    <div class="panel"><h2>Spend share by account <span class="tag">Relative</span></h2><div class="chartbox"><canvas id="chartAccount"></canvas></div></div>
+  </div>
+
+  <div class="panel"><h2>Recent activity <span class="tag">Relative</span></h2><div id="recentWrap"></div>
+    <p class="muted" style="font-size:11.5px;margin:10px 0 0">Bars show each posting's relative share of recent spend. Exact amounts and vendors are hidden in this public view.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Approval pipeline &amp; system health <span class="tag info">Status</span></h2>
+    <div class="flowrow">
+      <span class="stage">Submit (Form / WhatsApp)</span><span class="arrow">→</span>
+      <span class="stage">Manager</span><span class="arrow">→</span>
+      <span class="stage">Audit</span><span class="arrow">→</span>
+      <span class="stage">Accounts</span><span class="arrow">→</span>
+      <span class="stage">Top Management</span><span class="arrow">→</span>
+      <span class="stage">Posted to Zoho</span>
+    </div>
+    <table style="margin-top:12px">
+      <tr><td>Submission &amp; notify automation (Make)</td><td class="amt"><span class="pill ok">Active</span></td></tr>
+      <tr><td>New-submission Email + WhatsApp alerts</td><td class="amt"><span class="pill ok">On</span></td></tr>
+      <tr><td>Zoho Books accounting connection</td><td class="amt"><span class="pill ok">Live</span></td></tr>
+      <tr><td>Auto-post approved expense → Petty Cash</td><td class="amt"><span class="pill warn">Pending setup</span></td></tr>
+    </table>
+  </div>
+
+  <p class="foot"><span class="save">DO NOT PRINT — SAVE PAPER.</span></p>
+</div>
+
+<script>
+const ASOF='21 Jun 2026';
+document.getElementById('asof').textContent=ASOF;
+document.getElementById('kpiLast').textContent='28 Apr 2026';
+
+// Relative shares only (no absolute amounts published)
+const MONTHS=[{m:'Feb 26',pct:1.5},{m:'Apr 26',pct:98.5}];
+const ACCOUNTS=[
+  {a:'Computer Accessories',pct:63.5},
+  {a:'Tax Paid',pct:30.4},
+  {a:'Postage & Courier',pct:4.6},
+  {a:'Itemized (fuel/toll/food)',pct:1.5}
+];
+const RECENT=[
+  {date:'28 Apr 2026',cat:'Computer Accessories',pct:63.5},
+  {date:'22 Apr 2026',cat:'Tax Paid',pct:30.4},
+  {date:'09 Apr 2026',cat:'Postage & Courier',pct:4.6},
+  {date:'12 Feb 2026',cat:'Itemized (fuel/toll/food)',pct:1.5}
+];
+
+document.getElementById('recentWrap').innerHTML='<table><thead><tr><th>Date</th><th>Category</th><th>Relative size</th></tr></thead><tbody>'+
+  RECENT.map(r=>`<tr><td>${r.date}</td><td>${r.cat}</td><td><span class="bartrk"><span class="bar" style="width:${Math.max(6,r.pct)}%"></span></span> <span class="muted" style="font-size:11.5px">${r.pct}%</span></td></tr>`).join('')+'</tbody></table>';
+
+new Chart(document.getElementById('chartMonth'),{type:'bar',
+  data:{labels:MONTHS.map(x=>x.m),datasets:[{data:MONTHS.map(x=>x.pct),backgroundColor:'#2a6df4',borderRadius:6,maxBarThickness:60}]},
+  options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw+'% of period'}}},
+    scales:{y:{display:false},x:{grid:{display:false}}}}});
+
+const palette=['#2a6df4','#2e9d4f','#f0a500','#d23b46','#7a5af5','#00a3a3'];
+new Chart(document.getElementById('chartAccount'),{type:'doughnut',
+  data:{labels:ACCOUNTS.map(x=>x.a),datasets:[{data:ACCOUNTS.map(x=>x.pct),backgroundColor:palette,borderWidth:2,borderColor:'#fff'}]},
+  options:{responsive:true,maintainAspectRatio:false,cutout:'58%',
+    plugins:{legend:{position:'right',labels:{boxWidth:11,font:{size:11}}},tooltip:{callbacks:{label:c=>c.label+': '+c.raw+'%'}}}}});
+</script>
+</body>
+</html>
