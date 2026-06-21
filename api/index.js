@@ -43,14 +43,15 @@ function effectiveAmount(row) {
 }
 
 async function postWebhook(url, payload) {
-  if (!url) return;
+  if (!url) return false;
   try {
-    await fetch(url, {
+    const r = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-  } catch (e) { /* non-fatal: don't block the approval on a webhook error */ }
+    return r.ok;
+  } catch (e) { return false; }
 }
 
 export default async function handler(req, res) {
@@ -119,6 +120,7 @@ export default async function handler(req, res) {
       if (body.editedAmount != null && body.editedAmount !== '') edited = Number(body.editedAmount);
 
       const idx = STAGES.indexOf(row.stage);
+      if (idx === -1) return res.status(400).json({ ok: false, error: 'Unknown stage: ' + row.stage });
       const isFinal = idx === STAGES.length - 1;
       const nextStage = isFinal ? 'Posted' : STAGES[idx + 1];
 
@@ -133,7 +135,7 @@ export default async function handler(req, res) {
 
       if (isFinal) {
         // Post to Zoho through the Make webhook (Webhook → Zoho Create Expense)
-        await postWebhook(process.env.MAKE_ZOHO_WEBHOOK, {
+        const posted = await postWebhook(process.env.MAKE_ZOHO_WEBHOOK, {
           ref: updated.ref,
           employee_name: updated.employee_name,
           employee_id: updated.employee_id,
@@ -144,8 +146,10 @@ export default async function handler(req, res) {
           description: updated.description,
           amount: effectiveAmount(updated),
         });
-        await sql`UPDATE expenses SET zoho_posted = true WHERE id = ${id}`;
-        updated.zoho_posted = true;
+        if (posted) {
+          await sql`UPDATE expenses SET zoho_posted = true WHERE id = ${id}`;
+          updated.zoho_posted = true;
+        }
       }
       await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: isFinal ? 'posted' : 'advanced', expense: updated, stage: nextStage });
       return res.json({ ok: true, expense: updated });
