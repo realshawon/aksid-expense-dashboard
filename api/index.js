@@ -42,6 +42,11 @@ function effectiveAmount(row) {
   return (row.edited_amount != null) ? Number(row.edited_amount) : Number(row.amount);
 }
 
+const APP_BASE = process.env.APP_BASE_URL || 'https://aksid-expense-dashboard.vercel.app';
+function approveUrl(expense, stage) {
+  return APP_BASE + '/approve.html?id=' + expense.id + '&role=' + encodeURIComponent(stage || '');
+}
+
 async function postWebhook(url, payload) {
   if (!url) return false;
   try {
@@ -101,7 +106,7 @@ export default async function handler(req, res) {
       await sql`UPDATE expenses SET ref = ${ref} WHERE id = ${row.id}`;
       row.ref = ref;
       // notify (current approver = Manager)
-      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'submitted', expense: row, stage: 'Manager' });
+      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'submitted', expense: row, stage: 'Manager', approve_url: approveUrl(row, 'Manager') });
       return res.json({ ok: true, expense: row });
     }
 
@@ -151,7 +156,7 @@ export default async function handler(req, res) {
           updated.zoho_posted = true;
         }
       }
-      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: isFinal ? 'posted' : 'advanced', expense: updated, stage: nextStage });
+      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: isFinal ? 'posted' : 'advanced', expense: updated, stage: nextStage, approve_url: approveUrl(updated, nextStage) });
       return res.json({ ok: true, expense: updated });
     }
 
@@ -167,7 +172,7 @@ export default async function handler(req, res) {
       history.push({ stage: row.stage, action: 'rejected', by, at: new Date().toISOString(), reason });
       await sql`UPDATE expenses SET stage = 'Rejected', history = ${JSON.stringify(history)}::jsonb, updated_at = now() WHERE id = ${id}`;
       const updated = (await sql`SELECT * FROM expenses WHERE id = ${id}`)[0];
-      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'rejected', expense: updated, stage: 'Rejected' });
+      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'rejected', expense: updated, stage: 'Rejected', approve_url: approveUrl(updated, 'Rejected') });
       return res.json({ ok: true, expense: updated });
     }
 
