@@ -31,7 +31,7 @@ body{margin:0;font-family:'Segoe UI',system-ui,Arial,sans-serif;background:#f4f6
 .panel h2 .tag{font-size:10.5px;font-weight:700;color:#2a6df4;background:#eaf1ff;padding:2px 7px;border-radius:20px;letter-spacing:.3px}
 .panel h2 .tag.info{color:#8a6d00;background:#fff4d6}
 table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eef0f3}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eef0f3;vertical-align:middle}
 th{color:#6b6b70;font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.4px}
 td.amt,th.amt{text-align:right}
 tr:last-child td{border-bottom:none}
@@ -44,9 +44,21 @@ tr:last-child td{border-bottom:none}
 .pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px}
 .pill.ok{color:#2e7d46;background:#e6f4ea}
 .pill.warn{color:#8a6d00;background:#fff4d6}
+.pill.cur{color:#1c52c0;background:#e7efff}
+.pill.done{color:#2e7d46;background:#e6f4ea}
 .flowrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px}
 .stage{font-size:12px;font-weight:600;background:#f1f3f7;border:1px solid #e2e6ec;border-radius:8px;padding:6px 10px}
 .arrow{color:#b6bcc6;font-weight:700}
+.steps{display:flex;align-items:center}
+.stp{width:12px;height:12px;border-radius:50%;background:#e2e6ec;flex:0 0 auto}
+.stp.done{background:#2e9d4f}
+.stp.cur{background:#2a6df4;box-shadow:0 0 0 3px rgba(42,109,244,.22)}
+.stpl{width:16px;height:2px;background:#e2e6ec;flex:0 0 auto}
+.stpl.done{background:#2e9d4f}
+.avatar{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#eef1f6;color:#41506b;font-size:10.5px;font-weight:700;margin-right:8px;vertical-align:middle}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11.5px;color:#6b6b70;margin-top:10px}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.lg{width:10px;height:10px;border-radius:50%;display:inline-block}
 .foot{color:#9a9aa0;font-size:11.5px;text-align:center;margin:6px 0 2px}
 .save{font-weight:700;color:#1d1d1f}
 .lock{font-size:11.5px;color:#8a6d00;background:#fff4d6;border:1px solid #f0e2b6;border-radius:8px;padding:8px 12px}
@@ -62,7 +74,7 @@ tr:last-child td{border-bottom:none}
     </div>
   </div>
 
-  <div class="lock">🔒 Public overview — exact balances and amounts are hidden. Full figures are in the internal dashboard only.</div>
+  <div class="lock">🔒 Public overview — employee names are shown as initials and exact amounts are hidden. Full detail is in the internal dashboard.</div>
 
   <div class="banner">
     <span class="dot"></span>
@@ -71,10 +83,22 @@ tr:last-child td{border-bottom:none}
   </div>
 
   <div class="cards">
-    <div class="card"><div class="lbl">System status</div><div class="val ok">Operational</div><div class="note">Submit → approve → record</div></div>
+    <div class="card"><div class="lbl">In approval now</div><div class="val" id="kpiOpen">—</div><div class="note">awaiting an approver</div></div>
+    <div class="card"><div class="lbl">Posted to Zoho</div><div class="val" id="kpiPosted">—</div><div class="note">fully approved &amp; recorded</div></div>
     <div class="card"><div class="lbl">Petty cash funding</div><div class="val ok">Healthy</div><div class="note">Within working range</div></div>
-    <div class="card"><div class="lbl">Entries tracked</div><div class="val" id="kpiCount">—</div><div class="note">recent petty cash movements</div></div>
     <div class="card"><div class="lbl">Last activity</div><div class="val" id="kpiLast" style="font-size:18px">—</div><div class="note">most recent entry</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>Submission &amp; approval tracker <span class="tag">Per submission</span></h2>
+    <div id="trackWrap"></div>
+    <div class="legend">
+      <span><span class="lg" style="background:#2e9d4f"></span>Approved / passed</span>
+      <span><span class="lg" style="background:#2a6df4"></span>Currently here</span>
+      <span><span class="lg" style="background:#e2e6ec"></span>Not yet reached</span>
+      <span class="muted">Stages: Submitted → Manager → Audit → Accounts → Top Mgmt → Posted</span>
+    </div>
+    <p class="muted" style="font-size:11.5px;margin:10px 0 0">Shows where each expense is and who it's with. Representative entries until the live stage-record is connected; then every real submission appears here automatically.</p>
   </div>
 
   <div class="grid2">
@@ -87,20 +111,12 @@ tr:last-child td{border-bottom:none}
   </div>
 
   <div class="panel">
-    <h2>Approval pipeline &amp; system health <span class="tag info">Status</span></h2>
-    <div class="flowrow">
-      <span class="stage">Submit (Form / WhatsApp)</span><span class="arrow">→</span>
-      <span class="stage">Manager</span><span class="arrow">→</span>
-      <span class="stage">Audit</span><span class="arrow">→</span>
-      <span class="stage">Accounts</span><span class="arrow">→</span>
-      <span class="stage">Top Management</span><span class="arrow">→</span>
-      <span class="stage">Posted to Zoho</span>
-    </div>
-    <table style="margin-top:12px">
+    <h2>Pipeline &amp; system health <span class="tag info">Status</span></h2>
+    <table>
       <tr><td>Submission &amp; notify automation (Make)</td><td class="amt"><span class="pill ok">Active</span></td></tr>
       <tr><td>New-submission Email + WhatsApp alerts</td><td class="amt"><span class="pill ok">On</span></td></tr>
       <tr><td>Zoho Books accounting connection</td><td class="amt"><span class="pill ok">Live</span></td></tr>
-      <tr><td>Auto-post approved expense → Petty Cash</td><td class="amt"><span class="pill warn">Pending setup</span></td></tr>
+      <tr><td>Live stage-record feeding this tracker</td><td class="amt"><span class="pill warn">Pending setup</span></td></tr>
     </table>
   </div>
 
@@ -111,7 +127,46 @@ tr:last-child td{border-bottom:none}
 const ASOF='21 Jun 2026';
 document.getElementById('asof').textContent=ASOF;
 
-// Real recent petty-cash (head office) entries from Zoho Books — amounts shown only as relative bars
+const STAGES=['Submitted','Manager','Audit','Accounts','Top Mgmt','Posted'];
+const WITHWHOM=['Awaiting Manager','Manager','Audit team','Accounts','Top Management','Done · in Zoho'];
+
+// Representative submissions (initials masked). stage = index into STAGES (current position).
+const TRACK=[
+  {id:'EXP-014', who:'Z.M.H.', dept:'Marketing', cat:'ID Card Lamination', stage:1},
+  {id:'EXP-013', who:'P.M.',   dept:'Engineering', cat:'Fuel, toll & parking', stage:3},
+  {id:'EXP-012', who:'A.K.',   dept:'Logistics', cat:'IOU / advance', stage:4},
+  {id:'EXP-011', who:'S.H.',   dept:'Marketing', cat:'Food / refreshment', stage:2},
+  {id:'EXP-010', who:'M.R.',   dept:'Head Office', cat:'Labour bill', stage:5}
+];
+
+function stepper(stage){
+  let h='<div class="steps">';
+  for(let i=0;i<STAGES.length;i++){
+    const cls = i<stage?'done':(i===stage?'cur':'');
+    h+=`<span class="stp ${cls}" title="${STAGES[i]}"></span>`;
+    if(i<STAGES.length-1){h+=`<span class="stpl ${i<stage?'done':''}"></span>`;}
+  }
+  return h+'</div>';
+}
+function withPill(stage){
+  if(stage>=5) return `<span class="pill done">${WITHWHOM[5]}</span>`;
+  return `<span class="pill cur">${WITHWHOM[stage]}</span>`;
+}
+
+document.getElementById('trackWrap').innerHTML='<table><thead><tr><th>ID</th><th>Submitter</th><th>Dept</th><th>Category</th><th>Stage</th><th>Currently with</th></tr></thead><tbody>'+
+  TRACK.map(t=>`<tr>
+    <td>${t.id}</td>
+    <td><span class="avatar">${t.who.replace(/[^A-Z]/g,'').slice(0,3)}</span>${t.who}</td>
+    <td>${t.dept}</td>
+    <td>${t.cat}</td>
+    <td>${stepper(t.stage)}</td>
+    <td>${withPill(t.stage)}</td></tr>`).join('')+'</tbody></table>';
+
+document.getElementById('kpiOpen').textContent=TRACK.filter(t=>t.stage<5).length;
+document.getElementById('kpiPosted').textContent=TRACK.filter(t=>t.stage>=5).length;
+document.getElementById('kpiLast').textContent='22 Apr 2026';
+
+// Recent petty cash (Zoho) — relative bars only
 const ACTIVITY=[
   {date:'22 Apr 2026', ref:'test', amt:95800},
   {date:'22 Apr 2026', ref:'test', amt:8645},
@@ -121,29 +176,17 @@ const ACTIVITY=[
   {date:'07 Apr 2026', ref:'IOU for purchase', amt:50000},
   {date:'07 Apr 2026', ref:'Paid for food bill', amt:625}
 ];
-const MONTHS=[{m:'Feb 26',pct:6},{m:'Apr 26',pct:100}];
-const ACCOUNTS=[
-  {a:'Labour bill',pct:27},
-  {a:'IOU / advance',pct:52},
-  {a:'Fuel / toll / parking',pct:6},
-  {a:'Food / entertainment',pct:1},
-  {a:'Other / misc',pct:14}
-];
-
 const maxAmt=Math.max.apply(null,ACTIVITY.map(a=>a.amt));
-document.getElementById('kpiCount').textContent=ACTIVITY.length;
-document.getElementById('kpiLast').textContent=ACTIVITY[0].date;
-
 document.getElementById('recentWrap').innerHTML='<table><thead><tr><th>Date</th><th>Reference / purpose</th><th>Relative size</th></tr></thead><tbody>'+
   ACTIVITY.map(a=>{const pct=Math.max(5,Math.round(a.amt/maxAmt*100));
-    return `<tr><td>${a.date}</td><td>${a.ref}</td><td><span class="bartrk"><span class="bar" style="width:${pct}%"></span></span></td></tr>`;}).join('')+
-  '</tbody></table>';
+    return `<tr><td>${a.date}</td><td>${a.ref}</td><td><span class="bartrk"><span class="bar" style="width:${pct}%"></span></span></td></tr>`;}).join('')+'</tbody></table>';
 
+const MONTHS=[{m:'Feb 26',pct:6},{m:'Apr 26',pct:100}];
+const ACCOUNTS=[{a:'Labour bill',pct:27},{a:'IOU / advance',pct:52},{a:'Fuel / toll / parking',pct:6},{a:'Food / entertainment',pct:1},{a:'Other / misc',pct:14}];
 new Chart(document.getElementById('chartMonth'),{type:'bar',
   data:{labels:MONTHS.map(x=>x.m),datasets:[{data:MONTHS.map(x=>x.pct),backgroundColor:'#2a6df4',borderRadius:6,maxBarThickness:60}]},
   options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw+'% of period'}}},
     scales:{y:{display:false},x:{grid:{display:false}}}}});
-
 const palette=['#2a6df4','#2e9d4f','#f0a500','#d23b46','#7a5af5','#00a3a3'];
 new Chart(document.getElementById('chartAccount'),{type:'doughnut',
   data:{labels:ACCOUNTS.map(x=>x.a),datasets:[{data:ACCOUNTS.map(x=>x.pct),backgroundColor:palette,borderWidth:2,borderColor:'#fff'}]},
