@@ -38,6 +38,13 @@ const role=q.get('role')||'approver';
 let exp=null;
 
 function money(n){return '৳'+Math.round(Number(n||0)).toLocaleString('en-US');}
+function receiptsRow(exp){
+  let list=Array.isArray(exp.receipts)?exp.receipts:[];
+  if(!list.length&&exp.receipt_url)list=[{name:'Receipt',url:exp.receipt_url}];
+  if(!list.length)return '';
+  const links=list.map((r,i)=>`<a href="${r.url}" target="_blank">Open ${r.name||('Receipt '+(i+1))} ↗</a>`).join('<br>');
+  return `<tr><td class="k">Receipts</td><td class="v">${links}</td></tr>`;
+}
 
 async function loadExp(){
   if(!id){document.getElementById('card').innerHTML='<div class="sub">No expense id in the link.</div>';return;}
@@ -60,7 +67,7 @@ function render(){
       <tr><td class="k">Vendor</td><td class="v">${exp.vendor||'—'}</td></tr>
       <tr><td class="k">Description</td><td class="v">${exp.description||'—'}</td></tr>
       <tr><td class="k">Original amount</td><td class="v">${money(exp.amount)}</td></tr>
-      ${exp.receipt_url?`<tr><td class="k">Receipt</td><td class="v"><a href="${exp.receipt_url}" target="_blank">Open receipt</a></td></tr>`:''}
+      ${receiptsRow(exp)}
     </table>
     ${done?`<div class="msg ok">This expense is already <b>${exp.stage}</b>.</div>`:`
       <div class="amt"><span class="k" style="color:#6b6b70">Approved amount</span><input id="ed" type="number" step="0.01" value="${cur}"></div>
