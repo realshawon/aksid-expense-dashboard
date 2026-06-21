@@ -190,6 +190,34 @@ async function postWebhook(url, payload) {
   } catch (e) { return false; }
 }
 
+async function postWebhookJson(url, payload) {
+  if (!url) return null;
+  try {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (!r.ok) return null;
+    const t = await r.text();
+    try { return JSON.parse(t); } catch (_) { return { raw: t }; }
+  } catch (e) { return null; }
+}
+function sanitizePart(s) {
+  return String(s || '').trim().replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+}
+// Send the receipt to the Make "Receipt Filer" (OneDrive) webhook; returns the anonymous view link.
+async function fileReceipt(row, b64, origName, contentType) {
+  const url = process.env.MAKE_RECEIPT_WEBHOOK;
+  if (!url || !b64) return '';
+  const dot = (origName || '').lastIndexOf('.');
+  const ext = (dot >= 0 ? origName.slice(dot + 1) : 'bin').toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
+  const d = row.expense_date ? new Date(row.expense_date) : new Date();
+  const yyyy = String(d.getFullYear()); const mm = String(d.getMonth() + 1).padStart(2, '0'); const dd = String(d.getDate()).padStart(2, '0');
+  const dept = sanitizePart(row.cost_center) || 'General';
+  const fname = [yyyy + '-' + mm + '-' + dd, sanitizePart(row.category), sanitizePart(row.vendor), Math.round(effectiveAmount(row)), row.ref].filter(Boolean).join('_') + '.' + ext;
+  const folder = dept + '/' + yyyy + '/' + mm;
+  const resp = await postWebhookJson(url, { file_base64: b64, filename: fname, folder: folder, content_type: contentType || 'application/octet-stream', department: dept, ref: row.ref });
+  if (!resp) return '';
+  return resp.link || resp.url || resp.webUrl || (resp.raw && /^https?:\/\//.test(String(resp.raw).trim()) ? String(resp.raw).trim() : '') || '';
+}
+
 export default async function handler(req, res) {
   cors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -236,6 +264,11 @@ export default async function handler(req, res) {
       const ref = 'EXP-' + String(row.id).padStart(4, '0');
       await sql`UPDATE expenses SET ref = ${ref} WHERE id = ${row.id}`;
       row.ref = ref;
+      // file the receipt to OneDrive (rename + sort) and store the link
+      if (e.receipt_file) {
+        const link = await fileReceipt(row, e.receipt_file, e.receipt_filename, e.receipt_content_type);
+        if (link) { await sql`UPDATE expenses SET receipt_url = ${link} WHERE id = ${row.id}`; row.receipt_url = link; }
+      }
       // notify (current approver = Manager)
       const em0 = stepEmail(row, 'Manager');
       await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'submitted', expense: row, stage: 'Manager', to: toList([approverEmail(row, 'Manager')]), bcc: BCC_IT, email_subject: em0.subject, email_html: em0.html });
