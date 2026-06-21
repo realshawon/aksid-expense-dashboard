@@ -36,6 +36,15 @@ async function initDb() {
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
   )`;
+  await sql`CREATE TABLE IF NOT EXISTS attachments (
+    id SERIAL PRIMARY KEY,
+    expense_id INT,
+    name TEXT,
+    content_type TEXT,
+    data TEXT,
+    created_at TIMESTAMPTZ DEFAULT now()
+  )`;
+  await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS receipts JSONB DEFAULT '[]'::jsonb`;
 }
 
 function effectiveAmount(row) {
@@ -87,6 +96,13 @@ function receiptLink(url) {
   if (!url) return '—';
   return '<a href="' + esc(url) + '" style="color:#2a6df4;text-decoration:underline;font-weight:700">Open Receipt ↗</a>';
 }
+function receiptsCell(e) {
+  let list = Array.isArray(e.receipts) ? e.receipts : [];
+  if (!list.length && e.receipt_url) list = [{ name: 'Receipt', url: e.receipt_url }];
+  if (!list.length) return '';
+  const links = list.map((r, i) => '<a href="' + esc(r.url) + '" style="color:#2a6df4;text-decoration:underline;font-weight:700">Open ' + esc(r.name || ('Receipt ' + (i + 1))) + ' ↗</a>').join('<br>');
+  return row('Receipts', links);
+}
 function row(label, value, bold) {
   return '<tr><td style="padding:5px 14px 5px 0;color:#6b7280;font-size:13px;white-space:nowrap;vertical-align:top">' + esc(label) + '</td>'
     + '<td style="padding:5px 0;font-size:13px;color:#111827;' + (bold ? 'font-weight:700' : '') + '">' + value + '</td></tr>';
@@ -131,7 +147,7 @@ function stepEmail(e, stage) {
     + '<p style="font-size:15px;margin:0 0 2px"><b>Expense ' + esc(e.ref) + '</b> needs your approval.</p>'
     + '<p style="font-size:13px;color:#6b7280;margin:0 0 14px">Currently with: <b style="color:#2a6df4">' + esc(stage) + '</b></p>'
     + '<table style="border-collapse:collapse;margin:0 0 16px">' + detailRows(e)
-    + (e.receipt_url ? row('Receipt', receiptLink(e.receipt_url)) : '') + '</table>'
+    + receiptsCell(e) + '</table>'
     + '<p style="margin:0">' + approveButton(e, stage) + '</p>'
     + emailFoot();
   return { subject: 'AKSID Expense ' + e.ref + ' — ' + stage, html };
@@ -151,7 +167,7 @@ function summaryEmail(e) {
     + row('Vendor', esc(e.vendor), true)
     + row('Description', esc(e.description), true)
     + row('Amount', amtCell, true)
-    + (e.receipt_url ? row('Receipt', receiptLink(e.receipt_url)) : '');
+    + receiptsCell(e);
   const html = emailHead()
     + '<p style="font-size:17px;font-weight:700;margin:0 0 2px">Expense Approval Summary</p>'
     + '<p style="font-size:13px;color:#16a34a;font-weight:700;margin:0 0 14px">✅ Approved by all · posted to Zoho Books · ' + esc(e.ref) + '</p>'
@@ -250,6 +266,18 @@ export default async function handler(req, res) {
       return res.json({ ok: true, expense: rows[0], stages: STAGES });
     }
 
+    // --- receipt: serve an uploaded attachment by id (so approvers can view it) ---
+    if (action === 'receipt') {
+      const aid = req.query.aid || body.aid;
+      const rows = await sql`SELECT name, content_type, data FROM attachments WHERE id = ${aid}`;
+      if (!rows.length) return res.status(404).json({ ok: false, error: 'Not found' });
+      const a = rows[0];
+      const buf = Buffer.from(a.data || '', 'base64');
+      res.setHeader('Content-Type', a.content_type || 'application/octet-stream');
+      res.setHeader('Content-Disposition', 'inline; filename="' + String(a.name || 'receipt').replace(/[^A-Za-z0-9._-]/g, '_') + '"');
+      return res.status(200).send(buf);
+    }
+
     // --- submit: create a new expense (from the form / Make / web) ---
     if (action === 'submit') {
       const e = body;
@@ -264,10 +292,20 @@ export default async function handler(req, res) {
       const ref = 'EXP-' + String(row.id).padStart(4, '0');
       await sql`UPDATE expenses SET ref = ${ref} WHERE id = ${row.id}`;
       row.ref = ref;
-      // file the receipt to OneDrive (rename + sort) and store the link
-      if (e.receipt_file) {
-        const link = await fileReceipt(row, e.receipt_file, e.receipt_filename, e.receipt_content_type);
-        if (link) { await sql`UPDATE expenses SET receipt_url = ${link} WHERE id = ${row.id}`; row.receipt_url = link; }
+      // store uploaded receipt(s) — viewable via app links; also archive to OneDrive if the filer webhook is set
+      let files = Array.isArray(e.receipt_files) ? e.receipt_files.slice(0, 10) : [];
+      if (!files.length && e.receipt_file) files = [{ file_base64: e.receipt_file, filename: e.receipt_filename, content_type: e.receipt_content_type }];
+      const receipts = [];
+      for (const f of files) {
+        if (!f || !f.file_base64) continue;
+        const ins = await sql`INSERT INTO attachments (expense_id, name, content_type, data) VALUES (${row.id}, ${f.filename || 'receipt'}, ${f.content_type || 'application/octet-stream'}, ${f.file_base64}) RETURNING id`;
+        const aid = ins[0].id;
+        receipts.push({ aid, name: f.filename || ('Receipt ' + (receipts.length + 1)), url: APP_BASE + '/api?action=receipt&aid=' + aid });
+        try { await fileReceipt(row, f.file_base64, f.filename, f.content_type); } catch (_) {}
+      }
+      if (receipts.length) {
+        await sql`UPDATE expenses SET receipts = ${JSON.stringify(receipts)}::jsonb, receipt_url = ${receipts[0].url} WHERE id = ${row.id}`;
+        row.receipts = receipts; row.receipt_url = receipts[0].url;
       }
       // notify (current approver = Manager)
       const em0 = stepEmail(row, 'Manager');
