@@ -4,15 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AKSID Expense — Status Dashboard</title>
+<link rel="icon" type="image/png" href="https://images.squarespace-cdn.com/content/v1/61b1d88771230e2244b14213/62e8dc56a1a91f59e7a98ea4/AKSID+Logo+White.png?format=100w">
+<link rel="shortcut icon" href="https://static1.squarespace.com/static/61b1d88771230e2244b14213/t/62e8dc56a1a91f59e7a98ea4/1659427926820/AKSID+Logo+White.png?format=100w">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js"></script>
 <style>
 :root{color-scheme:light}
 *{box-sizing:border-box}
 body{margin:0;font-family:'Segoe UI',system-ui,Arial,sans-serif;background:#f4f6f9;color:#1d1d1f;font-size:14px}
 .wrap{max-width:1040px;margin:0 auto;padding:18px}
-h1{font-size:20px;margin:0 0 2px}
-.sub{color:#6b6b70;font-size:12.5px;margin:0 0 14px}
-.banner{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:12px;margin-bottom:16px;border:1px solid #d9e6d9;background:#eef8ee}
+.topbar{display:flex;align-items:center;gap:16px;margin-bottom:10px}
+.logo{height:46px;width:auto}
+.titlebox h1{font-size:20px;margin:0 0 2px}
+.sub{color:#6b6b70;font-size:12.5px;margin:0}
+.banner{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:12px;margin:14px 0 16px;border:1px solid #d9e6d9;background:#eef8ee}
 .dot{width:12px;height:12px;border-radius:50%;background:#2e9d4f;flex:0 0 auto;box-shadow:0 0 0 4px rgba(46,157,79,.18)}
 .banner b{font-size:14.5px}
 .banner .meta{margin-left:auto;color:#6b6b70;font-size:12px;text-align:right}
@@ -36,7 +40,7 @@ tr:last-child td{border-bottom:none}
 .chartbox{position:relative;height:240px}
 .muted{color:#6b6b70}
 .bar{height:8px;border-radius:6px;background:#2a6df4;display:inline-block;vertical-align:middle}
-.bartrk{background:#eef1f6;border-radius:6px;width:120px;display:inline-block;vertical-align:middle}
+.bartrk{background:#eef1f6;border-radius:6px;width:130px;display:inline-block;vertical-align:middle}
 .pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px}
 .pill.ok{color:#2e7d46;background:#e6f4ea}
 .pill.warn{color:#8a6d00;background:#fff4d6}
@@ -45,13 +49,18 @@ tr:last-child td{border-bottom:none}
 .arrow{color:#b6bcc6;font-weight:700}
 .foot{color:#9a9aa0;font-size:11.5px;text-align:center;margin:6px 0 2px}
 .save{font-weight:700;color:#1d1d1f}
-.lock{font-size:11.5px;color:#8a6d00;background:#fff4d6;border:1px solid #f0e2b6;border-radius:8px;padding:8px 12px;margin-bottom:16px}
+.lock{font-size:11.5px;color:#8a6d00;background:#fff4d6;border:1px solid #f0e2b6;border-radius:8px;padding:8px 12px}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>AKSID Expense — Status Dashboard</h1>
-  <p class="sub">AKSID Corporation Limited · expense automation health &amp; activity overview</p>
+  <div class="topbar">
+    <img class="logo" src="https://images.squarespace-cdn.com/content/v1/61b1d88771230e2244b14213/de522f80-4556-42c4-af20-e3687e746991/AKSID-HORIZONTAL-LOGO.png?format=750w" alt="AKSID Corporation Limited">
+    <div class="titlebox">
+      <h1>Expense — Status Dashboard</h1>
+      <p class="sub">AKSID Corporation Limited · expense automation health &amp; activity overview</p>
+    </div>
+  </div>
 
   <div class="lock">🔒 Public overview — exact balances and amounts are hidden. Full figures are in the internal dashboard only.</div>
 
@@ -64,8 +73,8 @@ tr:last-child td{border-bottom:none}
   <div class="cards">
     <div class="card"><div class="lbl">System status</div><div class="val ok">Operational</div><div class="note">Submit → approve → record</div></div>
     <div class="card"><div class="lbl">Petty cash funding</div><div class="val ok">Healthy</div><div class="note">Within working range</div></div>
-    <div class="card"><div class="lbl">Postings tracked</div><div class="val" id="kpiCount">4</div><div class="note">in Zoho Books</div></div>
-    <div class="card"><div class="lbl">Last activity</div><div class="val" id="kpiLast" style="font-size:18px">—</div><div class="note">most recent posting</div></div>
+    <div class="card"><div class="lbl">Entries tracked</div><div class="val" id="kpiCount">—</div><div class="note">recent petty cash movements</div></div>
+    <div class="card"><div class="lbl">Last activity</div><div class="val" id="kpiLast" style="font-size:18px">—</div><div class="note">most recent entry</div></div>
   </div>
 
   <div class="grid2">
@@ -73,8 +82,8 @@ tr:last-child td{border-bottom:none}
     <div class="panel"><h2>Spend share by account <span class="tag">Relative</span></h2><div class="chartbox"><canvas id="chartAccount"></canvas></div></div>
   </div>
 
-  <div class="panel"><h2>Recent activity <span class="tag">Relative</span></h2><div id="recentWrap"></div>
-    <p class="muted" style="font-size:11.5px;margin:10px 0 0">Bars show each posting's relative share of recent spend. Exact amounts and vendors are hidden in this public view.</p>
+  <div class="panel"><h2>Recent petty cash activity (Head Office) <span class="tag">Relative</span></h2><div id="recentWrap"></div>
+    <p class="muted" style="font-size:11.5px;margin:10px 0 0">Live from Zoho Books. Bars show each entry's relative size; exact BDT amounts are hidden in this public view.</p>
   </div>
 
   <div class="panel">
@@ -101,25 +110,34 @@ tr:last-child td{border-bottom:none}
 <script>
 const ASOF='21 Jun 2026';
 document.getElementById('asof').textContent=ASOF;
-document.getElementById('kpiLast').textContent='28 Apr 2026';
 
-// Relative shares only (no absolute amounts published)
-const MONTHS=[{m:'Feb 26',pct:1.5},{m:'Apr 26',pct:98.5}];
+// Real recent petty-cash (head office) entries from Zoho Books — amounts shown only as relative bars
+const ACTIVITY=[
+  {date:'22 Apr 2026', ref:'test', amt:95800},
+  {date:'22 Apr 2026', ref:'test', amt:8645},
+  {date:'22 Apr 2026', ref:'Test', amt:7000},
+  {date:'08 Apr 2026', ref:'Fuel, toll and parking', amt:5000},
+  {date:'07 Apr 2026', ref:'Paid for labour bill', amt:25800},
+  {date:'07 Apr 2026', ref:'IOU for purchase', amt:50000},
+  {date:'07 Apr 2026', ref:'Paid for food bill', amt:625}
+];
+const MONTHS=[{m:'Feb 26',pct:6},{m:'Apr 26',pct:100}];
 const ACCOUNTS=[
-  {a:'Computer Accessories',pct:63.5},
-  {a:'Tax Paid',pct:30.4},
-  {a:'Postage & Courier',pct:4.6},
-  {a:'Itemized (fuel/toll/food)',pct:1.5}
-];
-const RECENT=[
-  {date:'28 Apr 2026',cat:'Computer Accessories',pct:63.5},
-  {date:'22 Apr 2026',cat:'Tax Paid',pct:30.4},
-  {date:'09 Apr 2026',cat:'Postage & Courier',pct:4.6},
-  {date:'12 Feb 2026',cat:'Itemized (fuel/toll/food)',pct:1.5}
+  {a:'Labour bill',pct:27},
+  {a:'IOU / advance',pct:52},
+  {a:'Fuel / toll / parking',pct:6},
+  {a:'Food / entertainment',pct:1},
+  {a:'Other / misc',pct:14}
 ];
 
-document.getElementById('recentWrap').innerHTML='<table><thead><tr><th>Date</th><th>Category</th><th>Relative size</th></tr></thead><tbody>'+
-  RECENT.map(r=>`<tr><td>${r.date}</td><td>${r.cat}</td><td><span class="bartrk"><span class="bar" style="width:${Math.max(6,r.pct)}%"></span></span> <span class="muted" style="font-size:11.5px">${r.pct}%</span></td></tr>`).join('')+'</tbody></table>';
+const maxAmt=Math.max.apply(null,ACTIVITY.map(a=>a.amt));
+document.getElementById('kpiCount').textContent=ACTIVITY.length;
+document.getElementById('kpiLast').textContent=ACTIVITY[0].date;
+
+document.getElementById('recentWrap').innerHTML='<table><thead><tr><th>Date</th><th>Reference / purpose</th><th>Relative size</th></tr></thead><tbody>'+
+  ACTIVITY.map(a=>{const pct=Math.max(5,Math.round(a.amt/maxAmt*100));
+    return `<tr><td>${a.date}</td><td>${a.ref}</td><td><span class="bartrk"><span class="bar" style="width:${pct}%"></span></span></td></tr>`;}).join('')+
+  '</tbody></table>';
 
 new Chart(document.getElementById('chartMonth'),{type:'bar',
   data:{labels:MONTHS.map(x=>x.m),datasets:[{data:MONTHS.map(x=>x.pct),backgroundColor:'#2a6df4',borderRadius:6,maxBarThickness:60}]},
