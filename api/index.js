@@ -135,6 +135,7 @@ function approvalTrail(e) {
   if (!appr.length) return '<div style="font-size:12.5px;color:#9ca3af">—</div>';
   return appr.map(x => '<div style="font-size:12.5px;color:#111827;margin:3px 0">✓ <b>' + esc(x.stage) + '</b> '
     + money(x.amount) + (x.by ? ' <span style="color:#9ca3af">· ' + esc(x.by) + '</span>' : '')
+    + (x.sealed ? ' <span style="display:inline-block;background:#0e7490;color:#ffffff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px;letter-spacing:.04em">&#10003; AUDIT SEAL</span>' : '')
     + (x.comment ? ' <span style="color:#6b7280">— “' + esc(x.comment) + '”</span>' : '') + '</div>').join('');
 }
 function sectionLabel(t) {
@@ -143,11 +144,13 @@ function sectionLabel(t) {
 
 // Compact email at each approval step (with the action button)
 function stepEmail(e, stage) {
+  const hasTrail = (Array.isArray(e.history) ? e.history : []).some(x => x.action === 'approved');
   const html = emailHead()
     + '<p style="font-size:15px;margin:0 0 2px"><b>Expense ' + esc(e.ref) + '</b> needs your approval.</p>'
     + '<p style="font-size:13px;color:#6b7280;margin:0 0 14px">Currently with: <b style="color:#2a6df4">' + esc(stage) + '</b></p>'
     + '<table style="border-collapse:collapse;margin:0 0 16px">' + detailRows(e)
     + receiptsCell(e) + '</table>'
+    + (hasTrail ? sectionLabel('Approved so far') + approvalTrail(e) + '<div style="height:14px"></div>' : '')
     + '<p style="margin:0">' + approveButton(e, stage) + '</p>'
     + emailFoot();
   return { subject: 'AKSID Expense ' + e.ref + ' — ' + stage, html };
@@ -359,8 +362,10 @@ export default async function handler(req, res) {
       const nextStage = isFinal ? 'Posted' : STAGES[idx + 1];
 
       const comment = (body.comment != null && String(body.comment).trim() !== '') ? String(body.comment).trim() : undefined;
+      // Audit seal: only the Audit stage can apply it
+      const sealed = (row.stage === 'Audit' && (body.auditSeal === true || body.auditSeal === 'true')) ? true : undefined;
       const history = Array.isArray(row.history) ? row.history : [];
-      history.push({ stage: row.stage, action: 'approved', by, at: new Date().toISOString(), amount: (edited != null ? Number(edited) : Number(row.amount)), comment });
+      history.push({ stage: row.stage, action: 'approved', by, at: new Date().toISOString(), amount: (edited != null ? Number(edited) : Number(row.amount)), comment, sealed });
 
       await sql`UPDATE expenses
         SET stage = ${nextStage}, edited_amount = ${edited}, history = ${JSON.stringify(history)}::jsonb, updated_at = now()
