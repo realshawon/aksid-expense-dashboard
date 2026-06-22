@@ -194,6 +194,15 @@ function rejectedEmail(e) {
   return { subject: 'AKSID Expense ' + e.ref + ' — Rejected', html };
 }
 
+function submitterUpdateEmail(e, fromStage, toStage) {
+  const html = emailHead()
+    + '<p style="font-size:15px;margin:0 0 2px">Your expense <b>' + esc(e.ref) + '</b> has been approved.</p>'
+    + '<p style="font-size:13px;color:#6b7280;margin:0 0 14px">Approved at <b>' + esc(fromStage) + '</b> — now with <b style="color:#2a6df4">' + esc(toStage) + '</b>. No action needed from you.</p>'
+    + '<table style="border-collapse:collapse;margin:0 0 14px">' + detailRows(e) + receiptsCell(e) + '</table>'
+    + emailFoot();
+  return { subject: 'Your expense ' + e.ref + ' — approved at ' + fromStage + ', now with ' + toStage, html };
+}
+
 async function postWebhook(url, payload) {
   if (!url) return false;
   try {
@@ -252,25 +261,6 @@ export default async function handler(req, res) {
       return res.json({ ok: true, message: 'Database initialized.' });
     }
 
-    // --- admin: delete one expense (and its attachments) by id ---
-    if (action === 'delete') {
-      if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
-      const did = req.query.id || body.id;
-      await sql`DELETE FROM attachments WHERE expense_id = ${did}`;
-      await sql`DELETE FROM expenses WHERE id = ${did}`;
-      return res.json({ ok: true, message: 'Deleted expense ' + did });
-    }
-
-    // --- admin: purge ALL expenses + attachments and reset numbering (clean slate) ---
-    if (action === 'purge') {
-      if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
-      await sql`DELETE FROM attachments`;
-      await sql`DELETE FROM expenses`;
-      await sql`ALTER SEQUENCE expenses_id_seq RESTART WITH 1`;
-      await sql`ALTER SEQUENCE attachments_id_seq RESTART WITH 1`;
-      return res.json({ ok: true, message: 'All expenses and attachments deleted; numbering reset to EXP-0001.' });
-    }
-
     // --- list: all expenses (for the dashboard) ---
     if (action === 'list') {
       const rows = await sql`SELECT * FROM expenses ORDER BY created_at DESC LIMIT 200`;
@@ -283,6 +273,19 @@ export default async function handler(req, res) {
       const rows = await sql`SELECT * FROM expenses WHERE id = ${id}`;
       if (!rows.length) return res.status(404).json({ ok: false, error: 'Not found' });
       return res.json({ ok: true, expense: rows[0], stages: STAGES });
+    }
+
+    // --- resend: re-send the current-stage approver email (fresh, correct link) ---
+    if (action === 'resend') {
+      if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
+      const rid = req.query.id || body.id;
+      const rrows = await sql`SELECT * FROM expenses WHERE id = ${rid}`;
+      if (!rrows.length) return res.status(404).json({ ok: false, error: 'Not found' });
+      const ex = rrows[0];
+      if (ex.stage === 'Posted' || ex.stage === 'Rejected') return res.status(400).json({ ok: false, error: 'Not pending: ' + ex.stage });
+      const rem = stepEmail(ex, ex.stage);
+      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'resend', expense: ex, stage: ex.stage, to: toList([approverEmail(ex, ex.stage)]), bcc: [], email_subject: rem.subject, email_html: rem.html });
+      return res.json({ ok: true, message: 'Re-sent ' + ex.ref + ' to ' + ex.stage });
     }
 
     // --- receipt: serve an uploaded attachment by id (so approvers can view it) ---
@@ -388,6 +391,11 @@ export default async function handler(req, res) {
       const em = isFinal ? summaryEmail(updated) : stepEmail(updated, nextStage);
       const toRecipients = isFinal ? toList(allParties(updated)) : toList([approverEmail(updated, nextStage)]);
       await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: isFinal ? 'posted' : 'advanced', expense: updated, stage: nextStage, to: toRecipients, bcc: isFinal ? BCC_IT : [], email_subject: em.subject, email_html: em.html });
+      // keep the submitter informed on every intermediate approval (IT on BCC); the final summary already reaches them
+      if (!isFinal && updated.employee_email) {
+        const su = submitterUpdateEmail(updated, row.stage, nextStage);
+        await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'submitter_update', expense: updated, stage: nextStage, to: toList([updated.employee_email]), bcc: BCC_IT, email_subject: su.subject, email_html: su.html });
+      }
       return res.json({ ok: true, expense: updated });
     }
 
