@@ -323,6 +323,10 @@ export default async function handler(req, res) {
       if (row.stage === 'Posted' || row.stage === 'Rejected') {
         return res.status(400).json({ ok: false, error: 'Already ' + row.stage });
       }
+      // stale link guard: the email was for a specific stage; if it has moved on, don't let this approver act on the wrong stage
+      if (STAGES.includes(by) && by !== row.stage) {
+        return res.status(409).json({ ok: false, error: 'You have already approved this — it is now with ' + row.stage + '.' });
+      }
       // optional edited amount applied at this stage
       let edited = row.edited_amount;
       if (body.editedAmount != null && body.editedAmount !== '') edited = Number(body.editedAmount);
