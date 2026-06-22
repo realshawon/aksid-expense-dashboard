@@ -38,6 +38,7 @@ const role=q.get('role')||'approver';
 let exp=null;
 
 function money(n){return '৳'+Math.round(Number(n||0)).toLocaleString('en-US');}
+function stageLabel(s){return s==='Manager'?'Reporting':s;}
 function receiptsRow(exp){
   let list=Array.isArray(exp.receipts)?exp.receipts:[];
   if(!list.length&&exp.receipt_url)list=[{name:'Receipt',url:exp.receipt_url}];
@@ -48,9 +49,10 @@ function receiptsRow(exp){
 function trailRows(exp){
   const h=Array.isArray(exp.history)?exp.history:[];
   const appr=h.filter(x=>x.action==='approved');
-  if(!appr.length) return '';
-  const items=appr.map(x=>`<div style="font-size:13px;margin:3px 0">✓ <b>${x.stage}</b> ${money(x.amount)}${x.by?` <span style="color:#9a9aa0">· ${x.by}</span>`:''}${x.sealed?` <span style="display:inline-block;background:#0e7490;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px">✔ AUDIT SEAL</span>`:''}${x.comment?` <span style="color:#6b6b70">— “${x.comment}”</span>`:''}</div>`).join('');
-  return `<div style="margin:6px 0 14px"><div style="font-size:11px;color:#6b6b70;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin:0 0 4px">Approved so far</div>${items}</div>`;
+  const items=appr.map(x=>`<div style="font-size:13px;margin:3px 0">✓ <b>${stageLabel(x.stage)}</b> ${money(x.amount)}${x.by?` <span style="color:#9a9aa0">· ${stageLabel(x.by)}</span>`:''}${x.sealed?` <span style="display:inline-block;background:#0e7490;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px">✔ AUDIT SEAL</span>`:''}${x.comment?` <span style="color:#6b6b70">— “${x.comment}”</span>`:''}</div>`).join('');
+  const waiting=(exp.stage==='Posted'||exp.stage==='Rejected')?'':`<div style="font-size:13px;margin:6px 0 0;color:#1c52c0;font-weight:600">⏳ Waiting for approval: ${stageLabel(exp.stage)}</div>`;
+  if(!items && !waiting) return '';
+  return `<div style="margin:6px 0 14px"><div style="font-size:11px;color:#6b6b70;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin:0 0 4px">Approval status</div>${items}${waiting}</div>`;
 }
 
 async function loadExp(){
@@ -70,9 +72,9 @@ function render(){
   }else if(exp.stage==='Posted'){
     actionHtml=`<div class="msg ok">✅ Fully approved and <b>posted to Zoho Books</b>. No action needed.</div>`;
   }else if(roleIdx!==-1&&curIdx!==-1&&roleIdx<curIdx){
-    actionHtml=`<div class="msg ok">✅ You have already approved this as <b>${role}</b>. It has moved on and is now with <b>${exp.stage}</b>.</div>`;
+    actionHtml=`<div class="msg ok">✅ You have already approved this as <b>${stageLabel(role)}</b>. It has moved on and is now with <b>${stageLabel(exp.stage)}</b>.</div>`;
   }else if(roleIdx!==-1&&curIdx!==-1&&roleIdx>curIdx){
-    actionHtml=`<div class="msg ok">⏳ This hasn't reached your stage yet — it's currently with <b>${exp.stage}</b>. You'll get an email when it's your turn.</div>`;
+    actionHtml=`<div class="msg ok">⏳ This hasn't reached your stage yet — it's currently with <b>${stageLabel(exp.stage)}</b>. You'll get an email when it's your turn.</div>`;
   }else{
     actionHtml=`
       <div class="amt"><span class="k" style="color:#6b6b70">Approved amount</span><input id="ed" type="number" step="0.01" value="${cur}"></div>
@@ -83,7 +85,7 @@ function render(){
   }
   document.getElementById('card').innerHTML=`
     <h1>Expense ${exp.ref||('#'+exp.id)}</h1>
-    <p class="sub">Stage: <span class="stage">${exp.stage}</span></p>
+    <p class="sub">Stage: <span class="stage">${stageLabel(exp.stage)}</span></p>
     <table>
       <tr><td class="k">Employee</td><td class="v">${exp.employee_name||'—'} ${exp.employee_id?('· ID '+exp.employee_id):''}</td></tr>
       <tr><td class="k">Cost Center</td><td class="v">${exp.cost_center||'—'}</td></tr>
