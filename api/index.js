@@ -84,6 +84,7 @@ const BCC_IT = [{ address: IT_EMAIL }];
 
 function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function money(n) { return '৳' + Math.round(Number(n || 0)).toLocaleString('en-US'); }
+function stageLabel(s) { return s === 'Manager' ? 'Reporting' : s; }
 
 function approveUrlRaw(expense, stage) {
   return APP_BASE + '/approve.html?id=' + expense.id + '&role=' + encodeURIComponent(stage || '');
@@ -133,7 +134,7 @@ function approvalTrail(e) {
   const h = Array.isArray(e.history) ? e.history : [];
   const appr = h.filter(x => x.action === 'approved');
   if (!appr.length) return '<div style="font-size:12.5px;color:#9ca3af">—</div>';
-  return appr.map(x => '<div style="font-size:12.5px;color:#111827;margin:3px 0">✓ <b>' + esc(x.stage) + '</b> '
+  return appr.map(x => '<div style="font-size:12.5px;color:#111827;margin:3px 0">✓ <b>' + esc(stageLabel(x.stage)) + '</b> '
     + money(x.amount) + (x.by ? ' <span style="color:#9ca3af">· ' + esc(x.by) + '</span>' : '')
     + (x.sealed ? ' <span style="display:inline-block;background:#0e7490;color:#ffffff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px;letter-spacing:.04em">&#10003; AUDIT SEAL</span>' : '')
     + (x.comment ? ' <span style="color:#6b7280">— “' + esc(x.comment) + '”</span>' : '') + '</div>').join('');
@@ -147,13 +148,13 @@ function stepEmail(e, stage) {
   const hasTrail = (Array.isArray(e.history) ? e.history : []).some(x => x.action === 'approved');
   const html = emailHead()
     + '<p style="font-size:15px;margin:0 0 2px"><b>Expense ' + esc(e.ref) + '</b> needs your approval.</p>'
-    + '<p style="font-size:13px;color:#6b7280;margin:0 0 14px">Currently with: <b style="color:#2a6df4">' + esc(stage) + '</b></p>'
+    + '<p style="font-size:13px;color:#6b7280;margin:0 0 14px">Currently with: <b style="color:#2a6df4">' + esc(stageLabel(stage)) + '</b></p>'
     + '<table style="border-collapse:collapse;margin:0 0 16px">' + detailRows(e)
     + receiptsCell(e) + '</table>'
     + (hasTrail ? sectionLabel('Approved so far') + approvalTrail(e) + '<div style="height:14px"></div>' : '')
     + '<p style="margin:0">' + approveButton(e, stage) + '</p>'
     + emailFoot();
-  return { subject: 'AKSID Expense ' + e.ref + ' — ' + stage, html };
+  return { subject: 'AKSID Expense ' + e.ref + ' — ' + stageLabel(stage), html };
 }
 
 // Final summary email to everyone after Top Management approval + Zoho posting
@@ -200,10 +201,10 @@ function rejectedEmail(e) {
 function submitterUpdateEmail(e, fromStage, toStage) {
   const html = emailHead()
     + '<p style="font-size:15px;margin:0 0 2px">Your expense <b>' + esc(e.ref) + '</b> has been approved.</p>'
-    + '<p style="font-size:13px;color:#6b7280;margin:0 0 14px">Approved at <b>' + esc(fromStage) + '</b> — now with <b style="color:#2a6df4">' + esc(toStage) + '</b>. No action needed from you.</p>'
+    + '<p style="font-size:13px;color:#6b7280;margin:0 0 14px">Approved at <b>' + esc(stageLabel(fromStage)) + '</b> — now with <b style="color:#2a6df4">' + esc(stageLabel(toStage)) + '</b>. No action needed from you.</p>'
     + '<table style="border-collapse:collapse;margin:0 0 14px">' + detailRows(e) + receiptsCell(e) + '</table>'
     + emailFoot();
-  return { subject: 'Your expense ' + e.ref + ' — approved at ' + fromStage + ', now with ' + toStage, html };
+  return { subject: 'Your expense ' + e.ref + ' — approved at ' + stageLabel(fromStage) + ', now with ' + stageLabel(toStage), html };
 }
 
 async function postWebhook(url, payload) {
