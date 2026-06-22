@@ -366,7 +366,7 @@ export default async function handler(req, res) {
       }
       const em = isFinal ? summaryEmail(updated) : stepEmail(updated, nextStage);
       const toRecipients = isFinal ? toList(allParties(updated)) : toList([approverEmail(updated, nextStage)]);
-      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: isFinal ? 'posted' : 'advanced', expense: updated, stage: nextStage, to: toRecipients, bcc: BCC_IT, email_subject: em.subject, email_html: em.html });
+      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: isFinal ? 'posted' : 'advanced', expense: updated, stage: nextStage, to: toRecipients, bcc: isFinal ? BCC_IT : [], email_subject: em.subject, email_html: em.html });
       return res.json({ ok: true, expense: updated });
     }
 
