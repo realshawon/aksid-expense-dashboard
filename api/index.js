@@ -252,6 +252,25 @@ export default async function handler(req, res) {
       return res.json({ ok: true, message: 'Database initialized.' });
     }
 
+    // --- admin: delete one expense (and its attachments) by id ---
+    if (action === 'delete') {
+      if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
+      const did = req.query.id || body.id;
+      await sql`DELETE FROM attachments WHERE expense_id = ${did}`;
+      await sql`DELETE FROM expenses WHERE id = ${did}`;
+      return res.json({ ok: true, message: 'Deleted expense ' + did });
+    }
+
+    // --- admin: purge ALL expenses + attachments and reset numbering (clean slate) ---
+    if (action === 'purge') {
+      if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
+      await sql`DELETE FROM attachments`;
+      await sql`DELETE FROM expenses`;
+      await sql`ALTER SEQUENCE expenses_id_seq RESTART WITH 1`;
+      await sql`ALTER SEQUENCE attachments_id_seq RESTART WITH 1`;
+      return res.json({ ok: true, message: 'All expenses and attachments deleted; numbering reset to EXP-0001.' });
+    }
+
     // --- list: all expenses (for the dashboard) ---
     if (action === 'list') {
       const rows = await sql`SELECT * FROM expenses ORDER BY created_at DESC LIMIT 200`;
