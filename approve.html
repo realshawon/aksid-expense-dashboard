@@ -51,11 +51,28 @@ async function loadExp(){
   const r=await fetch('/api?action=get&id='+encodeURIComponent(id),{cache:'no-store'});
   const d=await r.json();
   if(!d.ok){document.getElementById('card').innerHTML='<div class="sub">'+(d.error||'Not found')+'</div>';return;}
-  exp=d.expense;render();
+  exp=d.expense;exp.__stages=d.stages;render();
 }
 function render(){
-  const done=(exp.stage==='Posted'||exp.stage==='Rejected');
   const cur=(exp.edited_amount!=null?exp.edited_amount:exp.amount);
+  const stages=exp.__stages||['Manager','Audit','Accounts','Top Mgmt'];
+  const roleIdx=stages.indexOf(role), curIdx=stages.indexOf(exp.stage);
+  let actionHtml;
+  if(exp.stage==='Rejected'){
+    actionHtml=`<div class="msg err">❌ This expense was <b>rejected</b>. No action needed.</div>`;
+  }else if(exp.stage==='Posted'){
+    actionHtml=`<div class="msg ok">✅ Fully approved and <b>posted to Zoho Books</b>. No action needed.</div>`;
+  }else if(roleIdx!==-1&&curIdx!==-1&&roleIdx<curIdx){
+    actionHtml=`<div class="msg ok">✅ You have already approved this as <b>${role}</b>. It has moved on and is now with <b>${exp.stage}</b>.</div>`;
+  }else if(roleIdx!==-1&&curIdx!==-1&&roleIdx>curIdx){
+    actionHtml=`<div class="msg ok">⏳ This hasn't reached your stage yet — it's currently with <b>${exp.stage}</b>. You'll get an email when it's your turn.</div>`;
+  }else{
+    actionHtml=`
+      <div class="amt"><span class="k" style="color:#6b6b70">Approved amount</span><input id="ed" type="number" step="0.01" value="${cur}"></div>
+      <label style="display:block;font-size:12px;color:#6b6b70;font-weight:600;margin:4px 0 4px">Comment (optional)</label>
+      <textarea id="cm" placeholder="Add a note${role==='Top Mgmt'?' — shown in the final summary email':''}" style="width:100%;font:inherit;padding:9px 11px;border:1px solid #d6dae1;border-radius:9px;min-height:54px;resize:vertical"></textarea>
+      <div class="btns"><button class="ap" onclick="act('approve')">Approve</button><button class="rj" onclick="act('reject')">Reject</button></div>`;
+  }
   document.getElementById('card').innerHTML=`
     <h1>Expense ${exp.ref||('#'+exp.id)}</h1>
     <p class="sub">Stage: <span class="stage">${exp.stage}</span></p>
@@ -69,11 +86,7 @@ function render(){
       <tr><td class="k">Original amount</td><td class="v">${money(exp.amount)}</td></tr>
       ${receiptsRow(exp)}
     </table>
-    ${done?`<div class="msg ok">This expense is already <b>${exp.stage}</b>.</div>`:`
-      <div class="amt"><span class="k" style="color:#6b6b70">Approved amount</span><input id="ed" type="number" step="0.01" value="${cur}"></div>
-      <label style="display:block;font-size:12px;color:#6b6b70;font-weight:600;margin:4px 0 4px">Comment (optional)</label>
-      <textarea id="cm" placeholder="Add a note${role==='Top Mgmt'?' — shown in the final summary email':''}" style="width:100%;font:inherit;padding:9px 11px;border:1px solid #d6dae1;border-radius:9px;min-height:54px;resize:vertical"></textarea>
-      <div class="btns"><button class="ap" onclick="act('approve')">Approve</button><button class="rj" onclick="act('reject')">Reject</button></div>`}
+    ${actionHtml}
     <div class="msg" id="msg"></div>
     <p class="muted">Approving advances to the next stage. The final approval posts the expense to Zoho Books automatically. <span class="save">DO NOT PRINT — SAVE PAPER.</span></p>`;
 }
