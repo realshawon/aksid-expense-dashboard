@@ -170,12 +170,12 @@ function summaryEmail(e) {
     + receiptsCell(e);
   const html = emailHead()
     + '<p style="font-size:17px;font-weight:700;margin:0 0 2px">Expense Approval Summary</p>'
-    + '<p style="font-size:13px;color:#16a34a;font-weight:700;margin:0 0 14px">✅ Approved by all · posted to Zoho Books · ' + esc(e.ref) + '</p>'
+    + (e.zoho_posted ? '<p style="font-size:13px;color:#16a34a;font-weight:700;margin:0 0 14px">✅ Approved by all · posted to Zoho Books · ' + esc(e.ref) + '</p>' : '<p style="font-size:13px;color:#b45309;font-weight:700;margin:0 0 14px">✅ Approved by all · ⚠️ NOT yet posted to Zoho Books — Accounts please post manually · ' + esc(e.ref) + '</p>')
     + '<table style="border-collapse:collapse;margin:0 0 8px">' + rows + '</table>'
     + sectionLabel('Approval Trail') + approvalTrail(e)
     + (comment ? sectionLabel('Top Management Comment') + '<p style="font-size:13px;color:#111827;margin:0;padding:9px 13px;background:#f3f4f6;border-radius:8px">' + esc(comment) + '</p>' : '')
     + emailFoot();
-  return { subject: 'Expense Approval Summary — ' + e.ref + (e.vendor ? ' (' + e.vendor + ')' : ''), html };
+  return { subject: (e.zoho_posted ? '' : '⚠️ Zoho posting failed — ') + 'Expense Approval Summary — ' + e.ref + (e.vendor ? ' (' + e.vendor + ')' : ''), html };
 }
 
 function rejectedEmail(e) {
@@ -348,7 +348,7 @@ export default async function handler(req, res) {
 
       if (isFinal) {
         // Post to Zoho through the Make webhook (Webhook → Zoho Create Expense)
-        const posted = await postWebhook(process.env.MAKE_ZOHO_WEBHOOK, {
+        const zohoPayload = {
           ref: updated.ref,
           employee_name: updated.employee_name,
           employee_id: updated.employee_id,
@@ -358,7 +358,9 @@ export default async function handler(req, res) {
           vendor: updated.vendor,
           description: updated.description,
           amount: effectiveAmount(updated),
-        });
+        };
+        let posted = await postWebhook(process.env.MAKE_ZOHO_WEBHOOK, zohoPayload);
+        if (!posted) posted = await postWebhook(process.env.MAKE_ZOHO_WEBHOOK, zohoPayload);
         if (posted) {
           await sql`UPDATE expenses SET zoho_posted = true WHERE id = ${id}`;
           updated.zoho_posted = true;
