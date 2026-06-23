@@ -315,7 +315,7 @@ export default async function handler(req, res) {
                 ${JSON.stringify([{ stage: 'Submitted', at: new Date().toISOString(), by: e.employee_name || '' }])}::jsonb)
         RETURNING *`;
       const row = inserted[0];
-      const ref = 'EXP-' + String(row.id).padStart(4, '0');
+      const ref = 'EXP-' + (1000000 + Number(row.id)); // 7-digit serial, starts with 1 (no leading zeros for Excel)
       await sql`UPDATE expenses SET ref = ${ref} WHERE id = ${row.id}`;
       row.ref = ref;
       // store uploaded receipt(s) — viewable via app links; also archive to OneDrive if the filer webhook is set
