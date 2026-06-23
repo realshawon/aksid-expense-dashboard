@@ -87,13 +87,9 @@ function money(n) { return '৳' + Math.round(Number(n || 0)).toLocaleString('en
 function stageLabel(s) { return s === 'Manager' ? 'Reporting' : s; }
 // Rich note for Zoho (employee · dept · purpose · vendor) so the posted expense reads the same as a manual entry
 function zohoNotes(e) {
-  const parts = [
-    String(e.employee_name || '') + (e.employee_id ? ' (ID ' + e.employee_id + ')' : ''),
-    e.cost_center || '',
-    e.description || '',
-    e.vendor ? ('Vendor: ' + e.vendor) : ''
-  ];
-  return parts.filter(x => x && String(x).trim()).join(' · ');
+  // Zoho/Make caps the Description at 100 chars — keep it concise: employee · dept · category · vendor
+  const parts = [String(e.employee_name || ''), e.cost_center || '', e.category || '', e.vendor || ''];
+  return parts.filter(x => x && String(x).trim()).join(' · ').slice(0, 100);
 }
 
 function approveUrlRaw(expense, stage) {
@@ -394,8 +390,7 @@ export default async function handler(req, res) {
           expense_date: updated.expense_date,
           category: updated.category,
           vendor: updated.vendor,
-          description: updated.description,
-          notes: zohoNotes(updated),
+          description: zohoNotes(updated),
           amount: effectiveAmount(updated),
         };
         let posted = await postWebhook(process.env.MAKE_ZOHO_WEBHOOK, zohoPayload);
