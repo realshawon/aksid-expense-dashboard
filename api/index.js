@@ -85,6 +85,16 @@ const BCC_IT = [{ address: IT_EMAIL }];
 function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function money(n) { return '৳' + Math.round(Number(n || 0)).toLocaleString('en-US'); }
 function stageLabel(s) { return s === 'Manager' ? 'Reporting' : s; }
+// Rich note for Zoho (employee · dept · purpose · vendor) so the posted expense reads the same as a manual entry
+function zohoNotes(e) {
+  const parts = [
+    String(e.employee_name || '') + (e.employee_id ? ' (ID ' + e.employee_id + ')' : ''),
+    e.cost_center || '',
+    e.description || '',
+    e.vendor ? ('Vendor: ' + e.vendor) : ''
+  ];
+  return parts.filter(x => x && String(x).trim()).join(' · ');
+}
 
 function approveUrlRaw(expense, stage) {
   return APP_BASE + '/approve.html?id=' + expense.id + '&role=' + encodeURIComponent(stage || '');
@@ -385,6 +395,7 @@ export default async function handler(req, res) {
           category: updated.category,
           vendor: updated.vendor,
           description: updated.description,
+          notes: zohoNotes(updated),
           amount: effectiveAmount(updated),
         };
         let posted = await postWebhook(process.env.MAKE_ZOHO_WEBHOOK, zohoPayload);
