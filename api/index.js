@@ -142,7 +142,7 @@ function approvalTrail(e) {
   const appr = h.filter(x => x.action === 'approved');
   if (!appr.length) return '<div style="font-size:12.5px;color:#9ca3af">—</div>';
   return appr.map(x => '<div style="font-size:12.5px;color:#111827;margin:3px 0">✓ <b>' + esc(stageLabel(x.stage)) + '</b> '
-    + money(x.amount) + (x.by ? ' <span style="color:#9ca3af">· ' + esc(x.by) + '</span>' : '')
+    + money(x.amount) + ((x.by && String(x.by).includes('@')) ? ' <span style="color:#9ca3af">· ' + esc(x.by) + '</span>' : '')
     + (x.sealed ? ' <span style="display:inline-block;background:#0e7490;color:#ffffff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px;letter-spacing:.04em">&#10003; AUDIT SEAL</span>' : '')
     + (x.comment ? ' <span style="color:#6b7280">— “' + esc(x.comment) + '”</span>' : '') + '</div>').join('');
 }
