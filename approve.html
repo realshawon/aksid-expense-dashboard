@@ -49,7 +49,7 @@ function receiptsRow(exp){
 function trailRows(exp){
   const h=Array.isArray(exp.history)?exp.history:[];
   const appr=h.filter(x=>x.action==='approved');
-  const items=appr.map(x=>`<div style="font-size:13px;margin:3px 0">✓ <b>${stageLabel(x.stage)}</b> ${money(x.amount)}${x.by?` <span style="color:#9a9aa0">· ${stageLabel(x.by)}</span>`:''}${x.sealed?` <span style="display:inline-block;background:#0e7490;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px">✔ AUDIT SEAL</span>`:''}${x.comment?` <span style="color:#6b6b70">— “${x.comment}”</span>`:''}</div>`).join('');
+  const items=appr.map(x=>`<div style="font-size:13px;margin:3px 0">✓ <b>${stageLabel(x.stage)}</b> ${money(x.amount)}${(x.by&&String(x.by).includes('@'))?` <span style="color:#9a9aa0">· ${x.by}</span>`:''}${x.sealed?` <span style="display:inline-block;background:#0e7490;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px">✔ AUDIT SEAL</span>`:''}${x.comment?` <span style="color:#6b6b70">— “${x.comment}”</span>`:''}</div>`).join('');
   const waiting=(exp.stage==='Posted'||exp.stage==='Rejected')?'':`<div style="font-size:13px;margin:6px 0 0;color:#1c52c0;font-weight:600">⏳ Waiting for approval: ${stageLabel(exp.stage)}</div>`;
   if(!items && !waiting) return '';
   return `<div style="margin:6px 0 14px"><div style="font-size:11px;color:#6b6b70;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin:0 0 4px">Approval status</div>${items}${waiting}</div>`;
