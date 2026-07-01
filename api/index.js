@@ -1,5 +1,5 @@
 // AKSID Expense backend — single serverless function (Vercel + Neon Postgres)
-// Routes by ?action= (or JSON body.action): init | list | get | submit | approve | reject | unreject
+// Routes by ?action= (or JSON body.action): init | list | get | submit | approve | reject | unreject | setManager
 import { neon } from '@neondatabase/serverless';
 
 const sql = neon(process.env.DATABASE_URL);
@@ -295,7 +295,7 @@ export default async function handler(req, res) {
       const ex = rrows[0];
       if (ex.stage === 'Posted' || ex.stage === 'Rejected') return res.status(400).json({ ok: false, error: 'Not pending: ' + ex.stage });
       const rem = stepEmail(ex, ex.stage);
-      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'resend', expense: ex, stage: ex.stage, to: toList([approverEmail(ex, ex.stage)]), bcc: [], email_subject: rem.subject, email_html: rem.html });
+      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'resend', expense: ex, stage: ex.stage, to: toList([approverEmail(ex, ex.stage)]), bcc: BCC_IT, email_subject: rem.subject, email_html: rem.html });
       return res.json({ ok: true, message: 'Re-sent ' + ex.ref + ' to ' + ex.stage });
     }
 
@@ -403,13 +403,32 @@ export default async function handler(req, res) {
       }
       const em = isFinal ? summaryEmail(updated) : stepEmail(updated, nextStage);
       const toRecipients = isFinal ? toList(allParties(updated)) : toList([approverEmail(updated, nextStage)]);
-      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: isFinal ? 'posted' : 'advanced', expense: updated, stage: nextStage, to: toRecipients, bcc: isFinal ? BCC_IT : [], email_subject: em.subject, email_html: em.html });
+      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: isFinal ? 'posted' : 'advanced', expense: updated, stage: nextStage, to: toRecipients, bcc: BCC_IT, email_subject: em.subject, email_html: em.html });
       // keep the submitter informed on every intermediate approval (IT on BCC); the final summary already reaches them
       if (!isFinal && updated.employee_email) {
         const su = submitterUpdateEmail(updated, row.stage, nextStage);
         await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'submitter_update', expense: updated, stage: nextStage, to: toList([updated.employee_email]), bcc: BCC_IT, email_subject: su.subject, email_html: su.html });
       }
       return res.json({ ok: true, expense: updated });
+    }
+
+    // --- setManager: change manager_email of an expense (and re-send if currently at Manager) ---
+    if (action === 'setManager') {
+      if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
+      const sid = req.query.id || body.id;
+      const newEmail = (req.query.email || body.email || '').toString().trim();
+      if (!newEmail) return res.status(400).json({ ok: false, error: 'email required' });
+      const srows = await sql`SELECT * FROM expenses WHERE id = ${sid}`;
+      if (!srows.length) return res.status(404).json({ ok: false, error: 'Not found' });
+      await sql`UPDATE expenses SET manager_email = ${newEmail}, updated_at = now() WHERE id = ${sid}`;
+      const ss = (await sql`SELECT * FROM expenses WHERE id = ${sid}`)[0];
+      let sent = false;
+      if (ss.stage === 'Manager') {
+        const sem = stepEmail(ss, 'Manager');
+        await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'manager_changed', expense: ss, stage: 'Manager', to: toList([newEmail]), bcc: BCC_IT, email_subject: sem.subject, email_html: sem.html });
+        sent = true;
+      }
+      return res.json({ ok: true, message: 'Manager email set for ' + ss.ref + ' to ' + newEmail + (sent ? ' (re-sent)' : '') });
     }
 
     // --- unreject: recover a Rejected expense back to a chosen stage (admin only) ---
