@@ -1,5 +1,5 @@
 // AKSID Expense backend — single serverless function (Vercel + Neon Postgres)
-// Routes by ?action= (or JSON body.action): init | list | get | submit | approve | reject
+// Routes by ?action= (or JSON body.action): init | list | get | submit | approve | reject | unreject
 import { neon } from '@neondatabase/serverless';
 
 const sql = neon(process.env.DATABASE_URL);
@@ -144,7 +144,7 @@ function approvalTrail(e) {
   return appr.map(x => '<div style="font-size:12.5px;color:#111827;margin:3px 0">✓ <b>' + esc(stageLabel(x.stage)) + '</b> '
     + money(x.amount) + ((x.by && String(x.by).includes('@')) ? ' <span style="color:#9ca3af">· ' + esc(x.by) + '</span>' : '')
     + (x.sealed ? ' <span style="display:inline-block;background:#0e7490;color:#ffffff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px;letter-spacing:.04em">&#10003; AUDIT SEAL</span>' : '')
-    + (x.comment ? ' <span style="color:#6b7280">— “' + esc(x.comment) + '”</span>' : '') + '</div>').join('');
+    + (x.comment ? ' <span style="color:#6b7280">— "' + esc(x.comment) + '"</span>' : '') + '</div>').join('');
 }
 function sectionLabel(t) {
   return '<p style="font-size:11px;color:#6b7280;margin:14px 0 4px;font-weight:700;text-transform:uppercase;letter-spacing:.05em">' + t + '</p>';
@@ -410,6 +410,25 @@ export default async function handler(req, res) {
         await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'submitter_update', expense: updated, stage: nextStage, to: toList([updated.employee_email]), bcc: BCC_IT, email_subject: su.subject, email_html: su.html });
       }
       return res.json({ ok: true, expense: updated });
+    }
+
+    // --- unreject: recover a Rejected expense back to a chosen stage (admin only) ---
+    if (action === 'unreject') {
+      if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
+      const uid = req.query.id || body.id;
+      const target = (req.query.stage || body.stage || 'Manager').toString();
+      if (!STAGES.includes(target)) return res.status(400).json({ ok: false, error: 'Bad stage: ' + target });
+      const urows = await sql`SELECT * FROM expenses WHERE id = ${uid}`;
+      if (!urows.length) return res.status(404).json({ ok: false, error: 'Not found' });
+      const ur = urows[0];
+      if (ur.stage !== 'Rejected') return res.status(400).json({ ok: false, error: 'Not rejected (stage=' + ur.stage + ')' });
+      const uhist = Array.isArray(ur.history) ? ur.history : [];
+      uhist.push({ stage: 'Rejected', action: 'unrejected', by: 'admin', at: new Date().toISOString(), to_stage: target });
+      await sql`UPDATE expenses SET stage = ${target}, history = ${JSON.stringify(uhist)}::jsonb, updated_at = now() WHERE id = ${uid}`;
+      const uu = (await sql`SELECT * FROM expenses WHERE id = ${uid}`)[0];
+      const uem = stepEmail(uu, target);
+      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'unrejected', expense: uu, stage: target, to: toList([approverEmail(uu, target)]), bcc: BCC_IT, email_subject: uem.subject, email_html: uem.html });
+      return res.json({ ok: true, message: 'Recovered ' + uu.ref + ' back to ' + target });
     }
 
     // --- reject ---
