@@ -34,13 +34,13 @@ button{width:100%;font:inherit;font-weight:700;border:none;border-radius:10px;pa
     <label>Expense Category</label><input id="category" placeholder="e.g. ID Card Lamination, Fuel, Stationery">
     <label>Vendor Name</label><input id="vendor">
     <label>Description / Purpose</label><textarea id="description"></textarea>
-    <div class="row"><div><label>Your Email</label><input id="employee_email" type="email"></div><div><label>Manager Email (approver)</label><input id="manager_email" type="email"></div></div>
+    <div class="row"><div><label>Your Email</label><input id="employee_email" type="email"></div><div><label>Manager / Reporting Email (approver)</label><input id="manager_email" type="email" placeholder="e.g. marketing@aksidcorp.com"></div></div>
     <label>Receipts / Documents (upload — you can pick several)</label><input id="receipt_file" type="file" multiple accept="image/*,.pdf,.heic,.png,.jpg,.jpeg">
     <p class="muted" style="margin-top:4px">Attach one or more files — each viewable by every approver from the email/approval page. Max 4 MB each. Or paste a link below instead.</p>
     <label>Receipt URL (optional, if no file)</label><input id="receipt_url" placeholder="link to the receipt">
     <button id="sbtn" onclick="submitExpense()">Submit for approval</button>
     <div class="msg" id="msg"></div>
-    <p class="muted">Goes to your Manager → Audit → Accounts → Top Management, then posts to Zoho. <span class="save">DO NOT PRINT — SAVE PAPER.</span></p>
+    <p class="muted">Goes to your Manager / Reporting → Audit → Accounts → Top Management, then posts to Zoho. <span class="save">DO NOT PRINT — SAVE PAPER.</span></p>
   </div>
 </div>
 <script>
@@ -55,7 +55,7 @@ async function submitExpense(){
   try{
     if(files.length){
       const big=files.find(f=>f.size>4*1024*1024);
-      if(big){m.className='msg err';m.textContent='“'+big.name+'” is over 4 MB — please upload a smaller file.';btn.disabled=false;return;}
+      if(big){m.className='msg err';m.textContent='"'+big.name+'" is over 4 MB — please upload a smaller file.';btn.disabled=false;return;}
       m.textContent='Uploading '+files.length+(files.length>1?' files…':' file…');
       body.receipt_files=[];
       for(const f of files){body.receipt_files.push({file_base64:await readFileB64(f),filename:f.name,content_type:f.type||'application/octet-stream'});}
@@ -65,7 +65,7 @@ async function submitExpense(){
     const d=await r.json();
     if(!d.ok){m.className='msg err';m.textContent=d.error||'Failed';btn.disabled=false;return;}
     const nr=(d.expense.receipts&&d.expense.receipts.length)||0;
-    m.className='msg ok';m.innerHTML='✅ Submitted as <b>'+d.expense.ref+'</b>'+(nr?(' with '+nr+' receipt'+(nr>1?'s':'')+' attached'):'')+'. It is now with your Manager for approval.';
+    m.className='msg ok';m.innerHTML='✅ Submitted as <b>'+d.expense.ref+'</b>'+(nr?(' with '+nr+' receipt'+(nr>1?'s':'')+' attached'):'')+'. It is now with your Manager / Reporting for approval.';
     F.forEach(k=>document.getElementById(k).value='');if(fi)fi.value='';
   }catch(e){m.className='msg err';m.textContent=String(e);}
   btn.disabled=false;
