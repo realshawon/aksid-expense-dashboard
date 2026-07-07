@@ -1,5 +1,5 @@
 // AKSID Expense backend — single serverless function (Vercel + Neon Postgres)
-// Routes by ?action= (or JSON body.action): init | list | get | submit | approve | reject | unreject | setManager
+// Routes by ?action= (or JSON body.action): init | list | get | submit | approve | reject
 import { neon } from '@neondatabase/serverless';
 
 const sql = neon(process.env.DATABASE_URL);
@@ -45,6 +45,19 @@ async function initDb() {
     created_at TIMESTAMPTZ DEFAULT now()
   )`;
   await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS receipts JSONB DEFAULT '[]'::jsonb`;
+}
+
+// --- Self-healing schema: make sure the tables/columns exist before any request runs.
+// initDb uses IF NOT EXISTS everywhere, so this is safe & idempotent to call on every cold start.
+let schemaReady = false;
+async function ensureSchema() {
+  if (schemaReady) return;
+  await initDb();
+  schemaReady = true;
+}
+function isSchemaError(err) {
+  const m = String((err && err.message) || err || '').toLowerCase();
+  return m.includes('does not exist') || m.includes('undefined column') || m.includes('relation') || m.includes('no such');
 }
 
 function effectiveAmount(row) {
@@ -144,7 +157,7 @@ function approvalTrail(e) {
   return appr.map(x => '<div style="font-size:12.5px;color:#111827;margin:3px 0">✓ <b>' + esc(stageLabel(x.stage)) + '</b> '
     + money(x.amount) + ((x.by && String(x.by).includes('@')) ? ' <span style="color:#9ca3af">· ' + esc(x.by) + '</span>' : '')
     + (x.sealed ? ' <span style="display:inline-block;background:#0e7490;color:#ffffff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px;letter-spacing:.04em">&#10003; AUDIT SEAL</span>' : '')
-    + (x.comment ? ' <span style="color:#6b7280">— "' + esc(x.comment) + '"</span>' : '') + '</div>').join('');
+    + (x.comment ? ' <span style="color:#6b7280">— “' + esc(x.comment) + '”</span>' : '') + '</div>').join('');
 }
 function sectionLabel(t) {
   return '<p style="font-size:11px;color:#6b7280;margin:14px 0 4px;font-weight:700;text-transform:uppercase;letter-spacing:.05em">' + t + '</p>';
@@ -216,14 +229,37 @@ function submitterUpdateEmail(e, fromStage, toStage) {
 
 async function postWebhook(url, payload) {
   if (!url) return false;
-  try {
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    return r.ok;
-  } catch (e) { return false; }
+  // Retry with backoff so a transient network/gateway blip doesn't drop the message.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (r.ok) return true;
+    } catch (e) { /* fall through to retry */ }
+    if (attempt < 2) await new Promise(r => setTimeout(r, 300 * (attempt + 1)));
+  }
+  return false;
+}
+
+// --- Outgoing "firewall": guarantee every notification payload is well-formed before it leaves.
+// This is what stops a malformed record (bad/empty recipients) from ever reaching — and breaking — the mailer.
+function validRecipients(arr) {
+  return Array.isArray(arr) && arr.length > 0 && arr.every(x => x && typeof x.address === 'string' && /.+@.+\..+/.test(x.address));
+}
+async function postNotify(payload) {
+  if (payload) {
+    if (!validRecipients(payload.to)) {
+      // normalize whatever we were given (strings or objects) into [{address}]
+      payload.to = toList((payload.to || []).map(x => (typeof x === 'string' ? x : (x && x.address) || '')));
+    }
+    if (!Array.isArray(payload.bcc)) payload.bcc = [];
+    // if there is still nobody valid to send to, skip silently rather than emit a broken payload
+    if (!validRecipients(payload.to)) return false;
+  }
+  return await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, payload);
 }
 
 async function postWebhookJson(url, payload) {
@@ -266,10 +302,42 @@ export default async function handler(req, res) {
       return res.status(500).json({ ok: false, error: 'DATABASE_URL not set — connect the Neon database to this Vercel project.' });
     }
 
+    // Self-heal: guarantee the schema exists before we touch it (cheap, idempotent, cached per instance).
+    await ensureSchema();
+
     // --- init: create the table (run once) ---
     if (action === 'init') {
       await initDb();
       return res.json({ ok: true, message: 'Database initialized.' });
+    }
+
+    // --- health: self-check the whole system (safe/read-only). Auto-repairs the schema on the way. ---
+    if (action === 'health') {
+      const checks = {};
+      try { await sql`SELECT 1`; checks.database = 'ok'; } catch (e) { checks.database = 'FAIL: ' + String((e && e.message) || e); }
+      try { schemaReady = false; await ensureSchema(); checks.schema = 'ok'; } catch (e) { checks.schema = 'FAIL: ' + String((e && e.message) || e); }
+      checks.config = {
+        database_url: !!process.env.DATABASE_URL,
+        notify_webhook: !!process.env.MAKE_NOTIFY_WEBHOOK,
+        zoho_webhook: !!process.env.MAKE_ZOHO_WEBHOOK,
+      };
+      const counts = {};
+      let pending = 0, unpostedFinal = 0;
+      try {
+        const rows = await sql`SELECT stage, count(*)::int AS c FROM expenses GROUP BY stage`;
+        for (const r of rows) { counts[r.stage] = r.c; if (!['Posted', 'Rejected'].includes(r.stage)) pending += r.c; }
+      } catch (e) { checks.counts = 'FAIL: ' + String((e && e.message) || e); }
+      try { const u = await sql`SELECT count(*)::int AS c FROM expenses WHERE stage = 'Posted' AND zoho_posted = false`; unpostedFinal = u[0] ? u[0].c : 0; } catch (e) {}
+      const healthy = checks.database === 'ok' && checks.schema === 'ok' && checks.config.database_url;
+      return res.json({
+        ok: healthy,
+        status: healthy ? 'operational' : 'degraded',
+        checks,
+        counts,
+        pending_approvals: pending,
+        approved_but_not_in_zoho: unpostedFinal,
+        at: new Date().toISOString(),
+      });
     }
 
     // --- list: all expenses (for the dashboard) ---
@@ -295,7 +363,7 @@ export default async function handler(req, res) {
       const ex = rrows[0];
       if (ex.stage === 'Posted' || ex.stage === 'Rejected') return res.status(400).json({ ok: false, error: 'Not pending: ' + ex.stage });
       const rem = stepEmail(ex, ex.stage);
-      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'resend', expense: ex, stage: ex.stage, to: toList([approverEmail(ex, ex.stage)]), bcc: BCC_IT, email_subject: rem.subject, email_html: rem.html });
+      await postNotify({ event: 'resend', expense: ex, stage: ex.stage, to: toList([approverEmail(ex, ex.stage)]), bcc: BCC_IT, email_subject: rem.subject, email_html: rem.html });
       return res.json({ ok: true, message: 'Re-sent ' + ex.ref + ' to ' + ex.stage });
     }
 
@@ -342,7 +410,7 @@ export default async function handler(req, res) {
       }
       // notify (current approver = Manager)
       const em0 = stepEmail(row, 'Manager');
-      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'submitted', expense: row, stage: 'Manager', to: toList([approverEmail(row, 'Manager')]), bcc: BCC_IT, email_subject: em0.subject, email_html: em0.html });
+      await postNotify({ event: 'submitted', expense: row, stage: 'Manager', to: toList([approverEmail(row, 'Manager')]), bcc: BCC_IT, email_subject: em0.subject, email_html: em0.html });
       return res.json({ ok: true, expense: row });
     }
 
@@ -403,11 +471,11 @@ export default async function handler(req, res) {
       }
       const em = isFinal ? summaryEmail(updated) : stepEmail(updated, nextStage);
       const toRecipients = isFinal ? toList(allParties(updated)) : toList([approverEmail(updated, nextStage)]);
-      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: isFinal ? 'posted' : 'advanced', expense: updated, stage: nextStage, to: toRecipients, bcc: BCC_IT, email_subject: em.subject, email_html: em.html });
+      await postNotify({ event: isFinal ? 'posted' : 'advanced', expense: updated, stage: nextStage, to: toRecipients, bcc: BCC_IT, email_subject: em.subject, email_html: em.html });
       // keep the submitter informed on every intermediate approval (IT on BCC); the final summary already reaches them
       if (!isFinal && updated.employee_email) {
         const su = submitterUpdateEmail(updated, row.stage, nextStage);
-        await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'submitter_update', expense: updated, stage: nextStage, to: toList([updated.employee_email]), bcc: BCC_IT, email_subject: su.subject, email_html: su.html });
+        await postNotify({ event: 'submitter_update', expense: updated, stage: nextStage, to: toList([updated.employee_email]), bcc: BCC_IT, email_subject: su.subject, email_html: su.html });
       }
       return res.json({ ok: true, expense: updated });
     }
@@ -425,7 +493,7 @@ export default async function handler(req, res) {
       let sent = false;
       if (ss.stage === 'Manager') {
         const sem = stepEmail(ss, 'Manager');
-        await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'manager_changed', expense: ss, stage: 'Manager', to: toList([newEmail]), bcc: BCC_IT, email_subject: sem.subject, email_html: sem.html });
+        await postNotify({ event: 'manager_changed', expense: ss, stage: 'Manager', to: toList([newEmail]), bcc: BCC_IT, email_subject: sem.subject, email_html: sem.html });
         sent = true;
       }
       return res.json({ ok: true, message: 'Manager email set for ' + ss.ref + ' to ' + newEmail + (sent ? ' (re-sent)' : '') });
@@ -446,7 +514,7 @@ export default async function handler(req, res) {
       await sql`UPDATE expenses SET stage = ${target}, history = ${JSON.stringify(uhist)}::jsonb, updated_at = now() WHERE id = ${uid}`;
       const uu = (await sql`SELECT * FROM expenses WHERE id = ${uid}`)[0];
       const uem = stepEmail(uu, target);
-      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'unrejected', expense: uu, stage: target, to: toList([approverEmail(uu, target)]), bcc: BCC_IT, email_subject: uem.subject, email_html: uem.html });
+      await postNotify({ event: 'unrejected', expense: uu, stage: target, to: toList([approverEmail(uu, target)]), bcc: BCC_IT, email_subject: uem.subject, email_html: uem.html });
       return res.json({ ok: true, message: 'Recovered ' + uu.ref + ' back to ' + target });
     }
 
@@ -463,13 +531,18 @@ export default async function handler(req, res) {
       await sql`UPDATE expenses SET stage = 'Rejected', history = ${JSON.stringify(history)}::jsonb, updated_at = now() WHERE id = ${id}`;
       const updated = (await sql`SELECT * FROM expenses WHERE id = ${id}`)[0];
       const emR = rejectedEmail(updated);
-      await postWebhook(process.env.MAKE_NOTIFY_WEBHOOK, { event: 'rejected', expense: updated, stage: 'Rejected', to: toList([updated.employee_email, updated.manager_email]), bcc: BCC_IT, email_subject: emR.subject, email_html: emR.html });
+      await postNotify({ event: 'rejected', expense: updated, stage: 'Rejected', to: toList([updated.employee_email, updated.manager_email]), bcc: BCC_IT, email_subject: emR.subject, email_html: emR.html });
       return res.json({ ok: true, expense: updated });
     }
 
     return res.status(400).json({ ok: false, error: 'Unknown action: ' + action });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: String(err && err.message || err) });
+    // Self-heal: if the failure looks like a missing table/column, repair the schema so the next call succeeds.
+    if (isSchemaError(err)) {
+      try { schemaReady = false; await ensureSchema(); } catch (_) {}
+      return res.status(503).json({ ok: false, error: 'Temporary schema issue was auto-repaired — please retry.', detail: String((err && err.message) || err) });
+    }
+    return res.status(500).json({ ok: false, error: String((err && err.message) || err) });
   }
 }
 
