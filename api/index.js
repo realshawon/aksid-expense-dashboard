@@ -227,6 +227,16 @@ function submitterUpdateEmail(e, fromStage, toStage) {
   return { subject: 'Your expense ' + e.ref + ' — approved at ' + stageLabel(fromStage) + ', now with ' + stageLabel(toStage), html };
 }
 
+// Confirmation to the SUBMITTER the moment their expense is filed (so they always get a mail on every submission).
+function submittedConfirmEmail(e) {
+  const html = emailHead()
+    + '<p style="font-size:15px;margin:0 0 2px">✅ Your expense <b>' + esc(e.ref) + '</b> has been submitted.</p>'
+    + '<p style="font-size:13px;color:#6b7280;margin:0 0 14px">It is now with your <b style="color:#2a6df4">Reporting</b> manager for approval. You will be emailed at every step — no action needed from you.</p>'
+    + '<table style="border-collapse:collapse;margin:0 0 14px">' + detailRows(e) + receiptsCell(e) + '</table>'
+    + emailFoot();
+  return { subject: 'Your expense ' + e.ref + ' — submitted, now with Reporting', html };
+}
+
 async function postWebhook(url, payload) {
   if (!url) return false;
   // Retry with backoff so a transient network/gateway blip doesn't drop the message.
@@ -411,6 +421,11 @@ export default async function handler(req, res) {
       // notify (current approver = Manager)
       const em0 = stepEmail(row, 'Manager');
       await postNotify({ event: 'submitted', expense: row, stage: 'Manager', to: toList([approverEmail(row, 'Manager')]), bcc: BCC_IT, email_subject: em0.subject, email_html: em0.html });
+      // confirm to the submitter that we received their expense (they get a mail on every submission)
+      if (row.employee_email) {
+        const sc = submittedConfirmEmail(row);
+        await postNotify({ event: 'submitted_confirm', expense: row, stage: 'Manager', to: toList([row.employee_email]), bcc: BCC_IT, email_subject: sc.subject, email_html: sc.html });
+      }
       return res.json({ ok: true, expense: row });
     }
 
