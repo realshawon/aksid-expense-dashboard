@@ -45,6 +45,16 @@ async function initDb() {
     created_at TIMESTAMPTZ DEFAULT now()
   )`;
   await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS receipts JSONB DEFAULT '[]'::jsonb`;
+  // Payment settlement (after Zoho posting): Accounts marks Paid → submitter confirms Received.
+  await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS settlement_status TEXT`; // null | 'paid' | 'closed' | 'issue'
+  await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payment_method TEXT`;
+  await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payment_ref TEXT`;
+  await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payment_date DATE`;
+  await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS paid_by TEXT`;
+  await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ`;
+  await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS received_at TIMESTAMPTZ`;
+  await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS issue_note TEXT`;
+  await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS issue_at TIMESTAMPTZ`;
 }
 
 // --- Self-healing schema: make sure the tables/columns exist before any request runs.
@@ -198,6 +208,9 @@ function summaryEmail(e) {
     + '<table style="border-collapse:collapse;margin:0 0 8px">' + rows + '</table>'
     + sectionLabel('Approval Trail') + approvalTrail(e)
     + (comment ? sectionLabel('Top Management Comment') + '<p style="font-size:13px;color:#111827;margin:0;padding:9px 13px;background:#f3f4f6;border-radius:8px">' + esc(comment) + '</p>' : '')
+    + sectionLabel('Next: payment')
+    + '<p style="font-size:13px;color:#6b7280;margin:0 0 10px">Accounts: once the reimbursement is paid, record it so the submitter can confirm receipt.</p>'
+    + '<p style="margin:0 0 4px">' + settleButton(settleUrl(e, 'Accounts'), '💸 Record Payment') + '</p>'
     + emailFoot();
   return { subject: (e.zoho_posted ? '' : '⚠️ Zoho posting failed — ') + 'Expense Approval Summary — ' + e.ref + (e.vendor ? ' (' + e.vendor + ')' : ''), html };
 }
@@ -225,6 +238,53 @@ function submitterUpdateEmail(e, fromStage, toStage) {
     + '<table style="border-collapse:collapse;margin:0 0 14px">' + detailRows(e) + receiptsCell(e) + '</table>'
     + emailFoot();
   return { subject: 'Your expense ' + e.ref + ' — approved at ' + stageLabel(fromStage) + ', now with ' + stageLabel(toStage), html };
+}
+
+// ---- Payment settlement (after Zoho posting) ----
+function settleUrl(e, role) {
+  return APP_BASE + '/settle.html?id=' + e.id + '&role=' + encodeURIComponent(role || '');
+}
+function settleButton(url, label, bg) {
+  return '<a href="' + url + '" style="display:inline-block;padding:12px 26px;background:' + (bg || '#2a6df4') + ';color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;font-family:Segoe UI,Arial,sans-serif;font-size:15px">' + label + '</a>';
+}
+function paymentRows(e) {
+  return row('Payment method', esc(e.payment_method || '—'), true)
+    + row('Reference', esc(e.payment_ref || '—'))
+    + row('Payment date', e.payment_date ? String(e.payment_date).slice(0, 10) : '—');
+}
+// Accounts marked it paid → ask the SUBMITTER to confirm they received the money.
+function paidEmail(e) {
+  const url = settleUrl(e, 'submitter');
+  const html = emailHead()
+    + '<p style="font-size:15px;margin:0 0 2px">💸 Your reimbursement for <b>' + esc(e.ref) + '</b> has been paid.</p>'
+    + '<p style="font-size:13px;color:#6b7280;margin:0 0 14px">Please confirm you received it — or let Accounts know if you did not.</p>'
+    + '<table style="border-collapse:collapse;margin:0 0 14px">'
+    + row('Amount', money(effectiveAmount(e)), true) + paymentRows(e) + '</table>'
+    + '<p style="margin:0 0 10px">' + settleButton(url, '✅ I received it', '#16a34a') + '</p>'
+    + '<p style="font-size:12px;color:#6b7280;margin:0">Didn\'t receive it? <a href="' + url + '" style="color:#b91c1c;font-weight:700">Report a problem</a>.</p>'
+    + emailFoot();
+  return { subject: 'Your reimbursement ' + e.ref + ' has been paid — please confirm receipt', html };
+}
+// Submitter confirmed receipt → notify Accounts / Top Management that it's fully closed.
+function closedEmail(e) {
+  const html = emailHead()
+    + '<p style="font-size:15px;color:#16a34a;font-weight:700;margin:0 0 2px">✅ ' + esc(e.ref) + ' is fully closed.</p>'
+    + '<p style="font-size:13px;color:#6b7280;margin:0 0 14px">The submitter confirmed they received the payment. No further action needed.</p>'
+    + '<table style="border-collapse:collapse;margin:0 0 14px">'
+    + row('Employee', esc(e.employee_name)) + row('Amount', money(effectiveAmount(e)), true) + paymentRows(e) + '</table>'
+    + emailFoot();
+  return { subject: 'Expense ' + e.ref + ' — closed (receipt confirmed)', html };
+}
+// Submitter reported NOT received → alert Accounts.
+function notReceivedEmail(e) {
+  const html = emailHead()
+    + '<p style="font-size:15px;color:#b91c1c;font-weight:700;margin:0 0 2px">⚠️ Payment issue reported — ' + esc(e.ref) + '</p>'
+    + '<p style="font-size:13px;color:#6b7280;margin:0 0 14px">The submitter says they have NOT received this reimbursement. Please follow up.</p>'
+    + '<table style="border-collapse:collapse;margin:0 0 14px">'
+    + row('Employee', esc(e.employee_name) + (e.employee_email ? (' · ' + esc(e.employee_email)) : '')) + row('Amount', money(effectiveAmount(e)), true) + paymentRows(e)
+    + (e.issue_note ? row('Note', esc(e.issue_note)) : '') + '</table>'
+    + emailFoot();
+  return { subject: '⚠️ Reimbursement ' + e.ref + ' — submitter reports NOT received', html };
 }
 
 // Confirmation to the SUBMITTER the moment their expense is filed (so they always get a mail on every submission).
@@ -375,6 +435,57 @@ export default async function handler(req, res) {
       const rem = stepEmail(ex, ex.stage);
       await postNotify({ event: 'resend', expense: ex, stage: ex.stage, to: toList([approverEmail(ex, ex.stage)]), bcc: BCC_IT, email_subject: rem.subject, email_html: rem.html });
       return res.json({ ok: true, message: 'Re-sent ' + ex.ref + ' to ' + ex.stage });
+    }
+
+    // --- pay: Accounts records the reimbursement payment (only after fully approved + posted) ---
+    if (action === 'pay') {
+      const pid = req.query.id || body.id;
+      const prows = await sql`SELECT * FROM expenses WHERE id = ${pid}`;
+      if (!prows.length) return res.status(404).json({ ok: false, error: 'Not found' });
+      const ex = prows[0];
+      if (ex.stage !== 'Posted') return res.status(400).json({ ok: false, error: 'Not payable yet — must be fully approved & posted. Current: ' + ex.stage });
+      if (ex.settlement_status === 'paid' || ex.settlement_status === 'closed') return res.status(409).json({ ok: false, error: 'Already ' + ex.settlement_status });
+      const method = (body.method || '').toString().trim();
+      const pref = (body.ref || '').toString().trim();
+      const pdate = ((body.date || '').toString().trim()) || new Date().toISOString().slice(0, 10);
+      if (!method) return res.status(400).json({ ok: false, error: 'Payment method is required' });
+      await sql`UPDATE expenses SET settlement_status = 'paid', payment_method = ${method}, payment_ref = ${pref}, payment_date = ${pdate}, paid_by = ${(body.by || 'Accounts')}, paid_at = now(), issue_note = NULL, issue_at = NULL, updated_at = now() WHERE id = ${pid}`;
+      const updated = (await sql`SELECT * FROM expenses WHERE id = ${pid}`)[0];
+      if (updated.employee_email) {
+        const pe = paidEmail(updated);
+        await postNotify({ event: 'paid', expense: updated, to: toList([updated.employee_email]), bcc: BCC_IT, email_subject: pe.subject, email_html: pe.html });
+      }
+      return res.json({ ok: true, expense: updated });
+    }
+
+    // --- confirmReceipt: submitter confirms they received the money → fully closed ---
+    if (action === 'confirmReceipt') {
+      const cid = req.query.id || body.id;
+      const crows = await sql`SELECT * FROM expenses WHERE id = ${cid}`;
+      if (!crows.length) return res.status(404).json({ ok: false, error: 'Not found' });
+      const ex = crows[0];
+      if (ex.settlement_status === 'closed') return res.json({ ok: true, expense: ex }); // idempotent
+      if (ex.settlement_status !== 'paid' && ex.settlement_status !== 'issue') return res.status(400).json({ ok: false, error: 'Not marked paid yet.' });
+      await sql`UPDATE expenses SET settlement_status = 'closed', received_at = now(), issue_note = NULL, issue_at = NULL, updated_at = now() WHERE id = ${cid}`;
+      const updated = (await sql`SELECT * FROM expenses WHERE id = ${cid}`)[0];
+      const ce = closedEmail(updated);
+      await postNotify({ event: 'closed', expense: updated, to: toList([ACCOUNTS_EMAIL, ACCOUNTS2_EMAIL, TOPMGMT_EMAIL]), bcc: BCC_IT, email_subject: ce.subject, email_html: ce.html });
+      return res.json({ ok: true, expense: updated });
+    }
+
+    // --- reportNotReceived: submitter flags they did NOT receive the money → alert Accounts ---
+    if (action === 'reportNotReceived') {
+      const nid = req.query.id || body.id;
+      const nrows = await sql`SELECT * FROM expenses WHERE id = ${nid}`;
+      if (!nrows.length) return res.status(404).json({ ok: false, error: 'Not found' });
+      const ex = nrows[0];
+      if (ex.settlement_status !== 'paid' && ex.settlement_status !== 'issue') return res.status(400).json({ ok: false, error: 'Not marked paid yet.' });
+      const note = (body.note || '').toString().trim().slice(0, 500);
+      await sql`UPDATE expenses SET settlement_status = 'issue', issue_note = ${note}, issue_at = now(), updated_at = now() WHERE id = ${nid}`;
+      const updated = (await sql`SELECT * FROM expenses WHERE id = ${nid}`)[0];
+      const ne = notReceivedEmail(updated);
+      await postNotify({ event: 'not_received', expense: updated, to: toList([ACCOUNTS_EMAIL, ACCOUNTS2_EMAIL]), bcc: BCC_IT, email_subject: ne.subject, email_html: ne.html });
+      return res.json({ ok: true, expense: updated });
     }
 
     // --- receipt: serve an uploaded attachment by id (so approvers can view it) ---
