@@ -437,6 +437,28 @@ export default async function handler(req, res) {
       return res.json({ ok: true, message: 'Re-sent ' + ex.ref + ' to ' + ex.stage });
     }
 
+    // --- addAttachment: attach a file to an EXISTING expense (viewable by current + all later approvers) ---
+    if (action === 'addAttachment') {
+      if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
+      const tid = req.query.id || body.id;
+      const trows = await sql`SELECT * FROM expenses WHERE id = ${tid}`;
+      if (!trows.length) return res.status(404).json({ ok: false, error: 'Not found' });
+      const ex = trows[0];
+      const b64 = body.file_base64;
+      if (!b64) return res.status(400).json({ ok: false, error: 'file_base64 required' });
+      const name = (body.filename || 'attachment').toString();
+      const ctype = (body.content_type || 'application/octet-stream').toString();
+      const ins = await sql`INSERT INTO attachments (expense_id, name, content_type, data) VALUES (${ex.id}, ${name}, ${ctype}, ${b64}) RETURNING id`;
+      const newAid = ins[0].id;
+      const url = APP_BASE + '/api?action=receipt&aid=' + newAid;
+      const list = Array.isArray(ex.receipts) ? ex.receipts : [];
+      list.push({ aid: newAid, name, url });
+      await sql`UPDATE expenses SET receipts = ${JSON.stringify(list)}::jsonb, receipt_url = COALESCE(NULLIF(receipt_url, ''), ${url}), updated_at = now() WHERE id = ${ex.id}`;
+      try { await fileReceipt(ex, b64, name, ctype); } catch (_) {}
+      const updated = (await sql`SELECT * FROM expenses WHERE id = ${ex.id}`)[0];
+      return res.json({ ok: true, aid: newAid, url, expense: updated });
+    }
+
     // --- pay: Accounts records the reimbursement payment (only after fully approved + posted) ---
     if (action === 'pay') {
       const pid = req.query.id || body.id;
