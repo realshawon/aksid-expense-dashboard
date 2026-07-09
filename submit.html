@@ -4,7 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AKSID Expense — Submit</title>
-<link rel="icon" type="image/png" href="https://images.squarespace-cdn.com/content/v1/61b1d88771230e2244b14213/62e8dc56a1a91f59e7a98ea4/AKSID+Logo+White.png?format=100w">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <style>
 :root{color-scheme:light}*{box-sizing:border-box}
 body{margin:0;font-family:'Segoe UI',system-ui,Arial,sans-serif;background:#f4f6f9;color:#1d1d1f;font-size:14px}
@@ -55,7 +57,7 @@ async function submitExpense(){
   try{
     if(files.length){
       const big=files.find(f=>f.size>4*1024*1024);
-      if(big){m.className='msg err';m.textContent='"'+big.name+'" is over 4 MB — please upload a smaller file.';btn.disabled=false;return;}
+      if(big){m.className='msg err';m.textContent='“'+big.name+'” is over 4 MB — please upload a smaller file.';btn.disabled=false;return;}
       m.textContent='Uploading '+files.length+(files.length>1?' files…':' file…');
       body.receipt_files=[];
       for(const f of files){body.receipt_files.push({file_base64:await readFileB64(f),filename:f.name,content_type:f.type||'application/octet-stream'});}
