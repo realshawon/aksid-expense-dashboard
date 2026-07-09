@@ -39,6 +39,7 @@ tr:last-child td{border-bottom:none}
 .avatar{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#eef1f6;color:#41506b;font-size:10.5px;font-weight:700;margin-right:8px;vertical-align:middle}
 .pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px}
 .pill.cur{color:#1c52c0;background:#e7efff}.pill.done{color:#2e7d46;background:#e6f4ea}.pill.rej{color:#a3242e;background:#fdeced}
+.pill.paid{color:#8a5a00;background:#fff3d6}.pill.closed{color:#226b39;background:#dff3e6}.pill.issue{color:#a3242e;background:#fdeced}
 .muted{color:#6b6b70}.foot{color:#9a9aa0;font-size:11.5px;text-align:center;margin:6px 0 2px}
 .save{font-weight:700;color:#1d1d1f}
 .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11.5px;color:#6b6b70;margin-top:10px}
@@ -99,8 +100,15 @@ function stepper(stage){
   }
   return h+'</div>';
 }
-function withPill(stage){
-  if(stage==='Posted')return '<span class="pill done">'+WITH.Posted+'</span>';
+function withPill(e){
+  const stage=(typeof e==='string')?e:e.stage;
+  const ss=(typeof e==='object')?e.settlement_status:null;
+  if(stage==='Posted'){
+    if(ss==='closed')return '<span class="pill closed">Received ✅ · closed</span>';
+    if(ss==='paid')return '<span class="pill paid">Paid · awaiting receipt</span>';
+    if(ss==='issue')return '<span class="pill issue">⚠ Not received</span>';
+    return '<span class="pill done">'+WITH.Posted+'</span>';
+  }
   if(stage==='Rejected')return '<span class="pill rej">Rejected</span>';
   return '<span class="pill cur">'+(WITH[stage]||stage)+'</span>';
 }
@@ -130,7 +138,7 @@ async function load(){
         <td>${e.cost_center||'—'}</td>
         <td>${e.category||'—'}</td>
         <td>${stepper(e.stage)}</td>
-        <td>${withPill(e.stage)}</td></tr>`).join('')+'</tbody></table>';
+        <td>${withPill(e)}</td></tr>`).join('')+'</tbody></table>';
   }catch(err){setBanner(false,String(err));}
 }
 load();
