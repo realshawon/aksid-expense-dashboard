@@ -542,10 +542,15 @@ export default async function handler(req, res) {
       const receipts = [];
       for (const f of files) {
         if (!f || !f.file_base64) continue;
-        const ins = await sql`INSERT INTO attachments (expense_id, name, content_type, data) VALUES (${row.id}, ${f.filename || 'receipt'}, ${f.content_type || 'application/octet-stream'}, ${f.file_base64}) RETURNING id`;
-        const aid = ins[0].id;
-        receipts.push({ aid, name: f.filename || ('Receipt ' + (receipts.length + 1)), url: APP_BASE + '/api?action=receipt&aid=' + aid });
-        try { await fileReceipt(row, f.file_base64, f.filename, f.content_type); } catch (_) {}
+        try {
+          const ins = await sql`INSERT INTO attachments (expense_id, name, content_type, data) VALUES (${row.id}, ${f.filename || 'receipt'}, ${f.content_type || 'application/octet-stream'}, ${f.file_base64}) RETURNING id`;
+          const aid = ins[0].id;
+          receipts.push({ aid, name: f.filename || ('Receipt ' + (receipts.length + 1)), url: APP_BASE + '/api?action=receipt&aid=' + aid });
+          try { await fileReceipt(row, f.file_base64, f.filename, f.content_type); } catch (_) {}
+        } catch (err) {
+          // one bad/oversized attachment shouldn't wipe out the others already saved
+          console.error('attachment insert failed:', f.filename, err && err.message);
+        }
       }
       if (receipts.length) {
         await sql`UPDATE expenses SET receipts = ${JSON.stringify(receipts)}::jsonb, receipt_url = ${receipts[0].url} WHERE id = ${row.id}`;

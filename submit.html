@@ -38,7 +38,7 @@ button{width:100%;font:inherit;font-weight:700;border:none;border-radius:10px;pa
     <label>Description / Purpose</label><textarea id="description"></textarea>
     <div class="row"><div><label>Your Email</label><input id="employee_email" type="email"></div><div><label>Manager / Reporting Email (approver)</label><input id="manager_email" type="email" placeholder="e.g. marketing@aksidcorp.com"></div></div>
     <label>Receipts / Documents (upload — you can pick several)</label><input id="receipt_file" type="file" multiple accept="image/*,.pdf,.heic,.png,.jpg,.jpeg">
-    <p class="muted" style="margin-top:4px">Attach one or more files — each viewable by every approver from the email/approval page. Max 4 MB each. Or paste a link below instead.</p>
+    <p class="muted" style="margin-top:4px">Attach one or more files — each viewable by every approver from the email/approval page. Photos are auto-compressed; PDFs max 4 MB each. Or paste a link below instead.</p>
     <label>Receipt URL (optional, if no file)</label><input id="receipt_url" placeholder="link to the receipt">
     <button id="sbtn" onclick="submitExpense()">Submit for approval</button>
     <div class="msg" id="msg"></div>
@@ -48,6 +48,21 @@ button{width:100%;font:inherit;font-weight:700;border:none;border-radius:10px;pa
 <script>
 const F=['employee_name','employee_id','cost_center','expense_date','amount','category','vendor','description','employee_email','manager_email','receipt_url'];
 function readFileB64(file){return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(String(fr.result).split(',')[1]);fr.onerror=rej;fr.readAsDataURL(file);});}
+function compressImage(file,maxDim,quality){
+  return new Promise((resolve)=>{
+    const img=new Image();const url=URL.createObjectURL(file);
+    img.onload=()=>{
+      URL.revokeObjectURL(url);
+      let w=img.width,h=img.height;
+      if(w>maxDim||h>maxDim){if(w>h){h=Math.round(h*maxDim/w);w=maxDim;}else{w=Math.round(w*maxDim/h);h=maxDim;}}
+      const c=document.createElement('canvas');c.width=w;c.height=h;
+      c.getContext('2d').drawImage(img,0,0,w,h);
+      c.toBlob(blob=>resolve(blob||file),'image/jpeg',quality);
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url);resolve(file);};
+    img.src=url;
+  });
+}
 async function submitExpense(){
   const m=document.getElementById('msg');const btn=document.getElementById('sbtn');
   m.className='msg';m.style.display='block';m.textContent='Submitting…';btn.disabled=true;
@@ -56,11 +71,19 @@ async function submitExpense(){
   const fi=document.getElementById('receipt_file');const files=fi&&fi.files?Array.from(fi.files):[];
   try{
     if(files.length){
-      const big=files.find(f=>f.size>4*1024*1024);
-      if(big){m.className='msg err';m.textContent='“'+big.name+'” is over 4 MB — please upload a smaller file.';btn.disabled=false;return;}
+      const hugeNonImage=files.find(f=>!f.type.startsWith('image/')&&f.size>4*1024*1024);
+      if(hugeNonImage){m.className='msg err';m.textContent='“'+hugeNonImage.name+'” is over 4 MB — please upload a smaller file.';btn.disabled=false;return;}
       m.textContent='Uploading '+files.length+(files.length>1?' files…':' file…');
       body.receipt_files=[];
-      for(const f of files){body.receipt_files.push({file_base64:await readFileB64(f),filename:f.name,content_type:f.type||'application/octet-stream'});}
+      let totalBytes=0;
+      for(const f of files){
+        let toSend=f;
+        if(f.type.startsWith('image/')&&f.size>500*1024) toSend=await compressImage(f,1600,0.8);
+        const b64=await readFileB64(toSend);
+        totalBytes+=b64.length;
+        body.receipt_files.push({file_base64:b64,filename:f.name,content_type:(f.type.startsWith('image/')?'image/jpeg':(f.type||'application/octet-stream'))});
+      }
+      if(totalBytes>4*1024*1024){m.className='msg err';m.textContent='Attachments are too large together (over 4 MB combined) — please remove one or upload fewer files.';btn.disabled=false;return;}
     }
     m.textContent='Submitting…';
     const r=await fetch('/api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
