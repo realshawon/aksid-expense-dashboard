@@ -92,7 +92,7 @@ function approverEmail(expense, stage) {
   return '';
 }
 function allParties(expense) {
-  return [expense.employee_email, expense.manager_email, AUDIT_EMAIL, ACCOUNTS_EMAIL, ACCOUNTS2_EMAIL, TOPMGMT_EMAIL];
+  return [expense.employee_email, AUDIT_EMAIL, ACCOUNTS_EMAIL, ACCOUNTS2_EMAIL, TOPMGMT_EMAIL];
 }
 // Dedupe + drop blanks, and never put IT in the visible To (IT is BCC only)
 function toList(arr) {
