@@ -29,6 +29,7 @@ const LEDGERS = [
   { key: 'cleaning',    label: 'Cleaning / Housekeeping',           account: 'GAEXP - Cleaning expense',                   account_id: '7058826000000465135', kw: ['cleaning', 'cleaner', 'housekeeping'] },
   { key: 'gift',        label: 'Gift & Donation',                   account: 'GAEXP - Gift and donation',                  account_id: '7058826000000465103', kw: ['gift', 'donation', 'hadia'] },
   { key: 'rent',        label: 'Office / House Rent',               account: 'GAEXP - Office rent',                        account_id: '7058826000000462279', kw: ['office rent', 'house rent'] },
+  { key: 'construction', label: 'Construction Material',            account: 'DEXP - Materials',                           account_id: '7058826000000749063', kw: ['construction', 'cement', 'rod', 'steel', 'brick', 'sand', 'aggregate', 'tiles', 'material', 'raw material'] },
   { key: 'office',      label: 'Office Expense (general)',          account: 'GAEXP - Office expense',                     account_id: '7058826000000465031', kw: [] },
 ];
 const DEFAULT_LEDGER = LEDGERS.find(l => l.key === 'office');
