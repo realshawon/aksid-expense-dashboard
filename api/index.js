@@ -4,8 +4,79 @@ import { neon } from '@neondatabase/serverless';
 
 const sql = neon(process.env.DATABASE_URL);
 
-// Approval pipeline order. After the last one is approved → "Posted".
+// Approval pipeline order. After the last one is approved → "Ready to Post" (Accounts reviews the
+// ledger/cost-center mapping and posts to Zoho manually) → "Posted".
 const STAGES = ['Manager', 'Audit', 'Accounts', 'Top Mgmt'];
+const READY = 'Ready to Post';
+
+// --- Zoho Books ledger map (source of truth = ZOHO_EXPENSE_MAPPING.md §2, org 898189923) ---
+// The submit form offers exactly these categories; keywords only guess for legacy free-text entries.
+const LEDGERS = [
+  { key: 'stationery',  label: 'Printing / Photocopy / Stationery', account: 'GAEXP - Printing, photocopy and stationery', account_id: '7058826000000465015', kw: ['lamination', 'print', 'photocopy', 'stationery', 'id card', 'paper', 'pen', 'toner'] },
+  { key: 'fuel',        label: 'Fuel for Vehicle',                  account: 'GAEXP - Fuel for vehicle',                   account_id: '7058826000000465159', kw: ['fuel', 'petrol', 'octane', 'diesel'] },
+  { key: 'toll',        label: 'Toll & Parking',                    account: 'GAEXP - Toll and perking vehicle',           account_id: '7058826000000749035', kw: ['toll', 'parking', 'perking'] },
+  { key: 'conveyance',  label: 'Local Conveyance (bus/CNG/rickshaw/ride)', account: 'GAEXP - Local conveyance',            account_id: '7058826000000462295', kw: ['conveyance', 'rickshaw', 'uber', 'pathao', 'bus', 'cng', 'auto', 'fare', 'transport'] },
+  { key: 'travel',      label: 'Travelling (tour/TA/DA)',           account: 'GAEXP - Travelling expense',                 account_id: '7058826000000465167', kw: ['travel', 'tour', 'ta/da', 'daily allowance'] },
+  { key: 'food',        label: 'Food / Entertainment / Refreshment', account: 'GAEXP - Entertainment',                     account_id: '7058826000000462303', kw: ['food', 'lunch', 'refreshment', 'entertainment', 'snacks', 'tea', 'late night'] },
+  { key: 'mobile',      label: 'Mobile Bill / Recharge',            account: 'GAEXP - Mobile bill',                        account_id: '7058826000000465047', kw: ['mobile', 'recharge', 'sim', 'talktime'] },
+  { key: 'internet',    label: 'Internet Bill',                     account: 'GAEXP - Internet bill',                      account_id: '7058826000000465063', kw: ['internet', 'wifi', 'broadband'] },
+  { key: 'courier',     label: 'Courier / Postage',                 account: 'GAEXP - Postage and courier charges',        account_id: '7058826000000465003', kw: ['courier', 'postage', 'parcel', 'shipment'] },
+  { key: 'repair',      label: 'Repair & Maintenance',              account: 'GAEXP - Repair and maintenance',             account_id: '7058826000000465079', kw: ['repair', 'maintenance', 'servicing', 'spare'] },
+  { key: 'medical',     label: 'Medical Expense',                   account: 'GAEXP - Medical expense',                    account_id: '7058826000000465111', kw: ['medical', 'medicine', 'doctor', 'pharmacy'] },
+  { key: 'computer',    label: 'Computer / IT Accessories',         account: 'GAEXP - Computer Accessories Exp',           account_id: '7058826000000749245', kw: ['computer', 'it ', 'it expense', 'hardware', 'accessories', 'mouse', 'keyboard', 'cable'] },
+  { key: 'labour',      label: 'Labour Bill',                       account: 'GAEXP - Labour bill',                        account_id: '7058826000000798325', kw: ['labour', 'labor', 'mistri', 'worker'] },
+  { key: 'electricity', label: 'Electricity Bill / Electric Items', account: 'GAEXP - Electricity bill',                   account_id: '7058826000000749149', kw: ['electricity', 'electric', 'current bill'] },
+  { key: 'cleaning',    label: 'Cleaning / Housekeeping',           account: 'GAEXP - Cleaning expense',                   account_id: '7058826000000465135', kw: ['cleaning', 'cleaner', 'housekeeping'] },
+  { key: 'gift',        label: 'Gift & Donation',                   account: 'GAEXP - Gift and donation',                  account_id: '7058826000000465103', kw: ['gift', 'donation', 'hadia'] },
+  { key: 'rent',        label: 'Office / House Rent',               account: 'GAEXP - Office rent',                        account_id: '7058826000000462279', kw: ['office rent', 'house rent'] },
+  { key: 'office',      label: 'Office Expense (general)',          account: 'GAEXP - Office expense',                     account_id: '7058826000000465031', kw: [] },
+];
+const DEFAULT_LEDGER = LEDGERS.find(l => l.key === 'office');
+
+// Departments / cost centers. `tag` must be an existing option of the Zoho "Head Office" reporting
+// tag (ZOHO_EXPENSE_MAPPING.md §2b) — labels without their own Zoho tag fall back to Head Office.
+const DEPARTMENTS = [
+  { label: 'Head Office',            tag: 'Head Office' },
+  { label: 'Administration',         tag: 'Administration' },
+  { label: 'Finance and Accounts',   tag: 'Finance and Accounts' },
+  { label: 'Audit',                  tag: 'Audit' },
+  { label: 'Human Resources',        tag: 'Human Resources' },
+  { label: 'MIS / IT',               tag: 'MIS' },
+  { label: 'Marketing and Brand',    tag: 'Marketing' },
+  { label: 'Purchase',               tag: 'Purchase' },
+  { label: 'Management',             tag: 'Management' },
+  { label: 'Construction Team',      tag: 'Construction Team' },
+  { label: 'Engineering Team',       tag: 'Engineering Team' },
+  { label: 'Logistics',              tag: 'Logistics' },
+  { label: 'Sales Team - SIKA',      tag: 'Sales Team - SIKA' },
+  { label: 'Institution Sales',      tag: 'Head Office' },
+  { label: 'Retail Sales',           tag: 'Head Office' },
+];
+
+function resolveLedger(e) {
+  if (e.category_key) { const hit = LEDGERS.find(l => l.key === e.category_key); if (hit) return hit; }
+  const text = ((e.category || '') + ' ' + (e.description || '')).toLowerCase();
+  for (const l of LEDGERS) { if (l.kw.some(k => text.includes(k))) return l; }
+  return DEFAULT_LEDGER;
+}
+function resolveDeptTag(costCenter) {
+  const t = (costCenter || '').toLowerCase();
+  const exact = DEPARTMENTS.find(d => d.label.toLowerCase() === t.trim());
+  if (exact) return exact.tag;
+  if (/market|brand/.test(t)) return 'Marketing';
+  if (/account|finance/.test(t)) return 'Finance and Accounts';
+  if (/audit/.test(t)) return 'Audit';
+  if (/\bhr\b|human resource/.test(t)) return 'Human Resources';
+  if (/mis|\bit\b|system/.test(t)) return 'MIS';
+  if (/purchase|procurement/.test(t)) return 'Purchase';
+  if (/management|\bmd\b|chairman|director/.test(t)) return 'Management';
+  if (/construction/.test(t)) return 'Construction Team';
+  if (/engineer/.test(t)) return 'Engineering Team';
+  if (/logistic/.test(t)) return 'Logistics';
+  if (/sika/.test(t)) return 'Sales Team - SIKA';
+  if (/admin|office/.test(t)) return 'Administration';
+  return 'Head Office';
+}
 
 function cors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -45,6 +116,8 @@ async function initDb() {
     created_at TIMESTAMPTZ DEFAULT now()
   )`;
   await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS receipts JSONB DEFAULT '[]'::jsonb`;
+  await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS category_key TEXT`;      // dropdown key → LEDGERS
+  await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS posting JSONB`;          // final lines posted to Zoho
   // Payment settlement (after Zoho posting): Accounts marks Paid → submitter confirms Received.
   await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS settlement_status TEXT`; // null | 'paid' | 'closed' | 'issue'
   await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payment_method TEXT`;
@@ -108,7 +181,7 @@ const BCC_IT = [{ address: IT_EMAIL }];
 
 function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function money(n) { return '৳' + Math.round(Number(n || 0)).toLocaleString('en-US'); }
-function stageLabel(s) { return s === 'Manager' ? 'Reporting' : s; }
+function stageLabel(s) { return s === 'Manager' ? 'Reporting' : (s === READY ? 'Accounts — posting to Zoho' : s); }
 // Rich note for Zoho (employee · dept · purpose · vendor) so the posted expense reads the same as a manual entry
 function zohoNotes(e) {
   // Zoho/Make caps the Description at 100 chars — keep it concise: employee · dept · category · vendor
@@ -213,6 +286,22 @@ function summaryEmail(e) {
     + '<p style="margin:0 0 4px">' + settleButton(settleUrl(e, 'Accounts'), '💸 Record Payment') + '</p>'
     + emailFoot();
   return { subject: (e.zoho_posted ? '' : '⚠️ Zoho posting failed — ') + 'Expense Approval Summary — ' + e.ref + (e.vendor ? ' (' + e.vendor + ')' : ''), html };
+}
+
+function readyToPostEmail(e) {
+  const led = resolveLedger(e);
+  const tag = resolveDeptTag(e.cost_center);
+  const url = APP_BASE + '/post.html';
+  const html = emailHead()
+    + '<p style="font-size:15px;margin:0 0 2px"><b>Expense ' + esc(e.ref) + '</b> is fully approved — ready to post to Zoho Books.</p>'
+    + '<p style="font-size:13px;color:#6b7280;margin:0 0 14px">Review the ledger &amp; cost-center mapping, then post it from the queue. Nothing goes to Zoho until you confirm.</p>'
+    + '<table style="border-collapse:collapse;margin:0 0 14px">' + detailRows(e)
+    + row('Suggested Ledger', esc(led.account))
+    + row('Suggested Tag', esc(tag))
+    + receiptsCell(e) + '</table>'
+    + '<p style="margin:0"><a href="' + url + '" style="display:inline-block;padding:12px 26px;background:#0e7490;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;font-family:Segoe UI,Arial,sans-serif;font-size:15px">Open Posting Queue</a></p>'
+    + emailFoot();
+  return { subject: 'Ready to post — ' + e.ref + ' · ' + money(effectiveAmount(e)) + (e.vendor ? ' (' + e.vendor + ')' : ''), html };
 }
 
 function rejectedEmail(e) {
@@ -437,6 +526,78 @@ export default async function handler(req, res) {
       return res.json({ ok: true, message: 'Re-sent ' + ex.ref + ' to ' + ex.stage });
     }
 
+    // --- config: dropdown lists for the forms (single source of truth for categories/departments) ---
+    if (action === 'config') {
+      return res.json({
+        ok: true,
+        categories: LEDGERS.map(l => ({ key: l.key, label: l.label, account: l.account, account_id: l.account_id })),
+        departments: DEPARTMENTS.map(d => ({ label: d.label, tag: d.tag })),
+      });
+    }
+
+    // --- postqueue: fully-approved expenses awaiting Zoho posting, with suggested mapping (admin) ---
+    if (action === 'postqueue') {
+      if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
+      const rows = await sql`SELECT * FROM expenses WHERE stage = ${READY} ORDER BY updated_at ASC`;
+      const out = rows.map(r => {
+        const led = resolveLedger(r);
+        return { ...r, suggestion: { category_key: led.key, account: led.account, account_id: led.account_id, tag: resolveDeptTag(r.cost_center) } };
+      });
+      return res.json({ ok: true, expenses: out });
+    }
+
+    // --- postToZoho: Accounts confirms the mapping (and optional cost-center split) → write to Zoho ---
+    if (action === 'postToZoho') {
+      if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
+      const pid = req.query.id || body.id;
+      const rows = await sql`SELECT * FROM expenses WHERE id = ${pid}`;
+      if (!rows.length) return res.status(404).json({ ok: false, error: 'Not found' });
+      const ex = rows[0];
+      if (ex.stage !== READY) return res.status(400).json({ ok: false, error: 'Not ready to post (stage=' + ex.stage + ')' });
+      const total = effectiveAmount(ex);
+      // lines: [{account_id, account_name, tag, amount}] — defaults to the suggestion as a single line
+      let lines = Array.isArray(body.lines) && body.lines.length ? body.lines : null;
+      if (!lines) {
+        const led = resolveLedger(ex);
+        lines = [{ account_id: led.account_id, account_name: led.account, tag: resolveDeptTag(ex.cost_center), amount: total }];
+      }
+      lines = lines.map(l => ({ account_id: String(l.account_id || ''), account_name: String(l.account_name || ''), tag: String(l.tag || 'Head Office'), amount: Number(l.amount || 0) }));
+      if (lines.some(l => !l.account_id || !(l.amount > 0))) return res.status(400).json({ ok: false, error: 'Every line needs an account and a positive amount.' });
+      const sum = lines.reduce((s, l) => s + l.amount, 0);
+      if (Math.abs(sum - total) > 0.01) return res.status(400).json({ ok: false, error: 'Lines total ' + sum.toFixed(2) + ' but the approved amount is ' + total.toFixed(2) + '.' });
+      // receipts go along so Make can attach them to the Zoho expense
+      const atts = await sql`SELECT id, name, content_type, data FROM attachments WHERE expense_id = ${ex.id} ORDER BY id ASC`;
+      const receipts = atts.map(a => ({ name: a.name, content_type: a.content_type, file_base64: a.data, url: APP_BASE + '/api?action=receipt&aid=' + a.id }));
+      const payload = {
+        ref: ex.ref,
+        employee_name: ex.employee_name,
+        employee_id: ex.employee_id,
+        cost_center: ex.cost_center,
+        expense_date: ex.expense_date,
+        category: ex.category,
+        vendor: ex.vendor,
+        description: zohoNotes(ex),
+        amount: total,
+        // resolved mapping — Make maps these straight into Zoho instead of a hardcoded account
+        account_id: lines[0].account_id,
+        account_name: lines[0].account_name,
+        tag_option: lines[0].tag,
+        line_items: lines,
+        is_split: lines.length > 1,
+        receipts,
+      };
+      let posted = await postWebhook(process.env.MAKE_ZOHO_WEBHOOK, payload);
+      if (!posted) posted = await postWebhook(process.env.MAKE_ZOHO_WEBHOOK, payload);
+      if (!posted) return res.status(502).json({ ok: false, error: 'Zoho webhook did not accept the posting — expense left in the queue.' });
+      const hist = Array.isArray(ex.history) ? ex.history : [];
+      hist.push({ stage: READY, action: 'posted', by: body.by || 'Accounts', at: new Date().toISOString(), lines });
+      await sql`UPDATE expenses SET stage = 'Posted', zoho_posted = true, posting = ${JSON.stringify(lines)}::jsonb, history = ${JSON.stringify(hist)}::jsonb, updated_at = now() WHERE id = ${ex.id}`;
+      const updated = (await sql`SELECT * FROM expenses WHERE id = ${ex.id}`)[0];
+      const em = summaryEmail(updated);
+      await postNotify({ event: 'posted', expense: updated, stage: 'Posted', to: toList(allParties(updated)), bcc: BCC_IT, email_subject: em.subject, email_html: em.html });
+      return res.json({ ok: true, expense: updated });
+    }
+
     // --- addAttachment: attach a file to an EXISTING expense (viewable by current + all later approvers) ---
     if (action === 'addAttachment') {
       if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
@@ -526,9 +687,9 @@ export default async function handler(req, res) {
     if (action === 'submit') {
       const e = body;
       const inserted = await sql`INSERT INTO expenses
-        (employee_name, employee_id, employee_email, cost_center, expense_date, category, vendor, description, amount, receipt_url, manager_email, stage, history)
+        (employee_name, employee_id, employee_email, cost_center, expense_date, category, category_key, vendor, description, amount, receipt_url, manager_email, stage, history)
         VALUES (${e.employee_name || ''}, ${e.employee_id || ''}, ${e.employee_email || ''}, ${e.cost_center || ''},
-                ${e.expense_date || null}, ${e.category || ''}, ${e.vendor || ''}, ${e.description || ''},
+                ${e.expense_date || null}, ${e.category || ''}, ${e.category_key || null}, ${e.vendor || ''}, ${e.description || ''},
                 ${e.amount || 0}, ${e.receipt_url || ''}, ${e.manager_email || ''}, 'Manager',
                 ${JSON.stringify([{ stage: 'Submitted', at: new Date().toISOString(), by: e.employee_name || '' }])}::jsonb)
         RETURNING *`;
@@ -574,8 +735,8 @@ export default async function handler(req, res) {
       const rows = await sql`SELECT * FROM expenses WHERE id = ${id}`;
       if (!rows.length) return res.status(404).json({ ok: false, error: 'Not found' });
       const row = rows[0];
-      if (row.stage === 'Posted' || row.stage === 'Rejected') {
-        return res.status(400).json({ ok: false, error: 'Already ' + row.stage });
+      if (row.stage === 'Posted' || row.stage === 'Rejected' || row.stage === READY) {
+        return res.status(400).json({ ok: false, error: row.stage === READY ? 'Already fully approved — pending posting by Accounts.' : ('Already ' + row.stage) });
       }
       // stale link guard: the email was for a specific stage; if it has moved on, don't let this approver act on the wrong stage
       if (STAGES.includes(by) && by !== row.stage) {
@@ -588,7 +749,7 @@ export default async function handler(req, res) {
       const idx = STAGES.indexOf(row.stage);
       if (idx === -1) return res.status(400).json({ ok: false, error: 'Unknown stage: ' + row.stage });
       const isFinal = idx === STAGES.length - 1;
-      const nextStage = isFinal ? 'Posted' : STAGES[idx + 1];
+      const nextStage = isFinal ? READY : STAGES[idx + 1];
 
       const comment = (body.comment != null && String(body.comment).trim() !== '') ? String(body.comment).trim() : undefined;
       // Audit seal: only the Audit stage can apply it
@@ -603,30 +764,16 @@ export default async function handler(req, res) {
       const updated = (await sql`SELECT * FROM expenses WHERE id = ${id}`)[0];
 
       if (isFinal) {
-        // Post to Zoho through the Make webhook (Webhook → Zoho Create Expense)
-        const zohoPayload = {
-          ref: updated.ref,
-          employee_name: updated.employee_name,
-          employee_id: updated.employee_id,
-          cost_center: updated.cost_center,
-          expense_date: updated.expense_date,
-          category: updated.category,
-          vendor: updated.vendor,
-          description: zohoNotes(updated),
-          amount: effectiveAmount(updated),
-        };
-        let posted = await postWebhook(process.env.MAKE_ZOHO_WEBHOOK, zohoPayload);
-        if (!posted) posted = await postWebhook(process.env.MAKE_ZOHO_WEBHOOK, zohoPayload);
-        if (posted) {
-          await sql`UPDATE expenses SET zoho_posted = true WHERE id = ${id}`;
-          updated.zoho_posted = true;
-        }
+        // Fully approved → hold for Accounts posting review (ledger, cost-center split, attachment
+        // are all confirmed by a human on post.html before anything reaches Zoho).
+        const rp = readyToPostEmail(updated);
+        await postNotify({ event: 'ready_to_post', expense: updated, stage: READY, to: toList([ACCOUNTS_EMAIL, ACCOUNTS2_EMAIL]), bcc: BCC_IT, email_subject: rp.subject, email_html: rp.html });
+      } else {
+        const em = stepEmail(updated, nextStage);
+        await postNotify({ event: 'advanced', expense: updated, stage: nextStage, to: toList([approverEmail(updated, nextStage)]), bcc: BCC_IT, email_subject: em.subject, email_html: em.html });
       }
-      const em = isFinal ? summaryEmail(updated) : stepEmail(updated, nextStage);
-      const toRecipients = isFinal ? toList(allParties(updated)) : toList([approverEmail(updated, nextStage)]);
-      await postNotify({ event: isFinal ? 'posted' : 'advanced', expense: updated, stage: nextStage, to: toRecipients, bcc: BCC_IT, email_subject: em.subject, email_html: em.html });
-      // keep the submitter informed on every intermediate approval (IT on BCC); the final summary already reaches them
-      if (!isFinal && updated.employee_email) {
+      // keep the submitter informed on every approval (IT on BCC); the posted summary comes later
+      if (updated.employee_email) {
         const su = submitterUpdateEmail(updated, row.stage, nextStage);
         await postNotify({ event: 'submitter_update', expense: updated, stage: nextStage, to: toList([updated.employee_email]), bcc: BCC_IT, email_subject: su.subject, email_html: su.html });
       }

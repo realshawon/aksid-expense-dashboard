@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AKSID Expense — Posting Queue</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<style>
+:root{color-scheme:light}*{box-sizing:border-box}
+body{margin:0;font-family:'Segoe UI',system-ui,Arial,sans-serif;background:#f4f6f9;color:#1d1d1f;font-size:14px}
+.wrap{max-width:860px;margin:0 auto;padding:20px}
+.logo{height:40px;margin-bottom:14px}
+h1{font-size:19px;margin:0 0 2px}.sub{color:#6b6b70;font-size:12.5px;margin:0 0 16px}
+.card{background:#fff;border:1px solid #e6e8ec;border-radius:14px;padding:18px;margin-bottom:16px}
+.ref{font-weight:700;font-size:15px}
+.meta{color:#6b6b70;font-size:12.5px;margin:2px 0 10px}
+.amt{font-weight:700;font-size:16px}
+table.det{border-collapse:collapse;margin:8px 0}
+table.det td{padding:3px 14px 3px 0;font-size:13px;vertical-align:top}
+table.det td.k{color:#6b7280;white-space:nowrap}
+.lines{margin:12px 0 4px}
+.line{display:flex;gap:8px;margin:6px 0;align-items:center}
+.line select,.line input{font:inherit;padding:8px 10px;border:1px solid #d6dae1;border-radius:8px;background:#fff}
+.line select.acc{flex:2.2}.line select.dep{flex:1.6}.line input.amt{width:110px;text-align:right}
+.line .rm{border:none;background:#fdeced;color:#a3242e;border-radius:8px;padding:8px 11px;cursor:pointer;font-weight:700}
+.addline{border:none;background:#eef2ff;color:#1c52c0;border-radius:8px;padding:8px 12px;cursor:pointer;font-weight:600;font-size:12.5px}
+.sumline{font-size:12.5px;margin:6px 0;color:#6b6b70}.sumline.bad{color:#a3242e;font-weight:700}
+.postbtn{border:none;background:#0e7490;color:#fff;border-radius:9px;padding:11px 22px;cursor:pointer;font-weight:700;font-size:14px}
+.postbtn:disabled{opacity:.5;cursor:default}
+.msg{margin-top:8px;padding:10px 13px;border-radius:9px;font-size:13px;display:none}
+.msg.ok{background:#e6f4ea;color:#226b39;display:block}.msg.err{background:#fdeced;color:#a3242e;display:block}
+.keybox{display:flex;gap:8px}.keybox input{flex:1;font:inherit;padding:10px 12px;border:1px solid #d6dae1;border-radius:9px}
+.keybox button{font:inherit;font-weight:700;border:none;border-radius:9px;padding:10px 18px;cursor:pointer;background:#2a6df4;color:#fff}
+.empty{color:#6b6b70;text-align:center;padding:30px 0}
+a{color:#2a6df4}
+.pill{display:inline-block;background:#fff7ed;color:#b45309;font-size:11px;font-weight:700;padding:2px 9px;border-radius:99px;margin-left:8px;vertical-align:middle}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <img class="logo" src="https://images.squarespace-cdn.com/content/v1/61b1d88771230e2244b14213/de522f80-4556-42c4-af20-e3687e746991/AKSID-HORIZONTAL-LOGO.png?format=750w" alt="AKSID">
+  <h1>Posting Queue — Zoho Books</h1>
+  <p class="sub">Fully-approved expenses waiting for Accounts. Confirm the ledger &amp; cost-center (split if needed) — nothing posts until you click.</p>
+
+  <div class="card" id="keycard">
+    <div class="keybox"><input id="key" type="password" placeholder="Admin key"><button onclick="saveKey()">Open queue</button></div>
+    <div class="msg" id="keymsg"></div>
+  </div>
+
+  <div id="queue"></div>
+</div>
+<script>
+let CFG=null, KEY=localStorage.getItem('aksid_admin_key')||'';
+function money(n){return '৳'+Math.round(Number(n||0)).toLocaleString('en-US');}
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function saveKey(){
+  KEY=document.getElementById('key').value.trim();
+  localStorage.setItem('aksid_admin_key',KEY);
+  load();
+}
+
+async function load(){
+  if(!KEY)return;
+  const km=document.getElementById('keymsg');
+  try{
+    if(!CFG){const rc=await fetch('/api?action=config');CFG=await rc.json();}
+    const r=await fetch('/api?action=postqueue&key='+encodeURIComponent(KEY));
+    const d=await r.json();
+    if(!d.ok){km.className='msg err';km.textContent=d.error||'Failed';return;}
+    document.getElementById('keycard').style.display='none';
+    render(d.expenses);
+  }catch(e){km.className='msg err';km.textContent=String(e);}
+}
+
+function accOptions(sel){return CFG.categories.map(c=>`<option value="${c.account_id}" data-name="${esc(c.account)}" ${c.account_id===sel?'selected':''}>${esc(c.account)}</option>`).join('');}
+function depOptions(sel){
+  const tags=[...new Set(CFG.departments.map(d=>d.tag))];
+  return tags.map(t=>`<option value="${esc(t)}" ${t===sel?'selected':''}>${esc(t)}</option>`).join('');
+}
+
+function lineHtml(i,acc,dep,amount){
+  return `<div class="line" data-exp="${i}">
+    <select class="acc">${accOptions(acc)}</select>
+    <select class="dep">${depOptions(dep)}</select>
+    <input class="amt" type="number" step="0.01" value="${amount}">
+    <button class="rm" onclick="this.parentElement.remove();recalc(${i})">✕</button>
+  </div>`;
+}
+
+function render(list){
+  const q=document.getElementById('queue');
+  if(!list.length){q.innerHTML='<div class="card empty">🎉 Nothing waiting — every approved expense is posted.</div>';return;}
+  q.innerHTML=list.map(e=>{
+    const recs=(e.receipts||[]).map((r,i)=>`<a href="${r.url}" target="_blank">Open ${esc(r.name||('Receipt '+(i+1)))} ↗</a>`).join('<br>')||'<span style="color:#a3242e">— no attachment —</span>';
+    const amt=e.edited_amount!=null?Number(e.edited_amount):Number(e.amount);
+    return `<div class="card" id="exp${e.id}">
+      <div class="ref">${esc(e.ref)} <span class="pill">READY TO POST</span></div>
+      <div class="meta">${esc(e.employee_name)} · ${esc(e.cost_center)} · ${e.expense_date?String(e.expense_date).slice(0,10):'—'}</div>
+      <table class="det">
+        <tr><td class="k">Category (submitted)</td><td>${esc(e.category)}</td></tr>
+        <tr><td class="k">Vendor</td><td>${esc(e.vendor)||'—'}</td></tr>
+        <tr><td class="k">Description</td><td>${esc(e.description)||'—'}</td></tr>
+        <tr><td class="k">Approved amount</td><td class="amt">${money(amt)}</td></tr>
+        <tr><td class="k">Receipts</td><td>${recs}</td></tr>
+      </table>
+      <div style="font-size:11px;color:#6b6b70;font-weight:700;text-transform:uppercase;letter-spacing:.05em">Post as (ledger · department tag · amount)</div>
+      <div class="lines" id="lines${e.id}">${lineHtml(e.id,e.suggestion.account_id,e.suggestion.tag,amt)}</div>
+      <button class="addline" onclick="addLine(${e.id})">+ Split into another line</button>
+      <div class="sumline" id="sum${e.id}"></div>
+      <button class="postbtn" id="btn${e.id}" onclick="postIt(${e.id},${amt})">Post to Zoho Books</button>
+      <div class="msg" id="msg${e.id}"></div>
+    </div>`;
+  }).join('');
+  list.forEach(e=>{
+    const amt=e.edited_amount!=null?Number(e.edited_amount):Number(e.amount);
+    document.getElementById('lines'+e.id).addEventListener('input',()=>recalc(e.id,amt));
+    recalc(e.id,amt);
+  });
+  window.__amts={};list.forEach(e=>{window.__amts[e.id]=e.edited_amount!=null?Number(e.edited_amount):Number(e.amount);});
+}
+
+function addLine(id){
+  const box=document.getElementById('lines'+id);
+  box.insertAdjacentHTML('beforeend',lineHtml(id,CFG.categories.find(c=>c.key==='office').account_id,'Head Office',0));
+  recalc(id,window.__amts[id]);
+}
+
+function getLines(id){
+  return Array.from(document.querySelectorAll('#lines'+id+' .line')).map(l=>{
+    const a=l.querySelector('.acc');
+    return {account_id:a.value,account_name:a.options[a.selectedIndex].dataset.name,tag:l.querySelector('.dep').value,amount:Number(l.querySelector('.amt').value||0)};
+  });
+}
+
+function recalc(id,total){
+  total=total!=null?total:(window.__amts?window.__amts[id]:0);
+  const lines=getLines(id);
+  const sum=lines.reduce((s,l)=>s+l.amount,0);
+  const el=document.getElementById('sum'+id);const btn=document.getElementById('btn'+id);
+  if(!el)return;
+  const ok=Math.abs(sum-total)<=0.01;
+  el.className='sumline'+(ok?'':' bad');
+  el.textContent='Lines total: '+money(sum)+' / approved '+money(total)+(ok?' ✓':' — must match exactly');
+  if(btn)btn.disabled=!ok;
+}
+
+async function postIt(id,total){
+  const btn=document.getElementById('btn'+id);const m=document.getElementById('msg'+id);
+  btn.disabled=true;m.className='msg';m.style.display='block';m.textContent='Posting to Zoho…';
+  try{
+    const r=await fetch('/api',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'postToZoho',id,key:KEY,by:'Accounts',lines:getLines(id)})});
+    const d=await r.json();
+    if(!d.ok){m.className='msg err';m.textContent=d.error||'Failed';btn.disabled=false;return;}
+    m.className='msg ok';m.textContent='✅ Posted to Zoho Books as '+d.expense.ref+'. Summary email sent.';
+    setTimeout(()=>{const c=document.getElementById('exp'+id);if(c)c.remove();},1800);
+  }catch(e){m.className='msg err';m.textContent=String(e);btn.disabled=false;}
+}
+
+if(KEY){document.getElementById('key').value=KEY;load();}
+</script>
+</body>
+</html>

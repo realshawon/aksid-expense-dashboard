@@ -77,7 +77,7 @@ button.r{font:inherit;font-size:12px;border:1px solid #d6dae1;background:#fff;bo
       <span><span class="lg" style="background:#2a6df4"></span>Currently here</span>
       <span><span class="lg" style="background:#e2e6ec"></span>Not yet reached</span>
       <span><span class="lg" style="background:#d23b46"></span>Rejected</span>
-      <span class="muted">Submitted → Manager → Audit → Accounts → Top Mgmt → Posted</span>
+      <span class="muted">Submitted → Manager → Audit → Accounts → Top Mgmt → Ready to Post → Posted</span>
     </div>
   </div>
 
@@ -85,8 +85,8 @@ button.r{font:inherit;font-size:12px;border:1px solid #d6dae1;background:#fff;bo
 </div>
 
 <script>
-const ORDER=['Submitted','Manager','Audit','Accounts','Top Mgmt','Posted'];
-const WITH={Manager:'Manager',Audit:'Audit team',Accounts:'Accounts','Top Mgmt':'Top Management',Posted:'Done · in Zoho',Rejected:'Rejected'};
+const ORDER=['Submitted','Manager','Audit','Accounts','Top Mgmt','Ready to Post','Posted'];
+const WITH={Manager:'Manager',Audit:'Audit team',Accounts:'Accounts','Top Mgmt':'Top Management','Ready to Post':'Accounts · posting',Posted:'Done · in Zoho',Rejected:'Rejected'};
 const initials=n=>(n||'?').split(/\s+/).map(w=>w[0]).join('').slice(0,3).toUpperCase();
 
 function stepper(stage){
@@ -129,7 +129,7 @@ async function load(){
     setBanner(true);
     const ex=d.expenses||[];
     document.getElementById('kTotal').textContent=ex.length;
-    document.getElementById('kOpen').textContent=ex.filter(e=>['Manager','Audit','Accounts','Top Mgmt'].includes(e.stage)).length;
+    document.getElementById('kOpen').textContent=ex.filter(e=>['Manager','Audit','Accounts','Top Mgmt','Ready to Post'].includes(e.stage)).length;
     document.getElementById('kPosted').textContent=ex.filter(e=>e.stage==='Posted').length;
     document.getElementById('kRej').textContent=ex.filter(e=>e.stage==='Rejected').length;
     if(!ex.length){document.getElementById('trackWrap').innerHTML='<div class="empty">No submissions yet. New expenses will appear here automatically.</div>';return;}
