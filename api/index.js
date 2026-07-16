@@ -802,6 +802,25 @@ export default async function handler(req, res) {
       return res.json({ ok: true, message: 'Manager email set for ' + ss.ref + ' to ' + newEmail + (sent ? ' (re-sent)' : '') });
     }
 
+    // --- edit: admin correction of safe fields on an existing expense ---
+    if (action === 'edit') {
+      if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
+      const eid = req.query.id || body.id;
+      const erows = await sql`SELECT * FROM expenses WHERE id = ${eid}`;
+      if (!erows.length) return res.status(404).json({ ok: false, error: 'Not found' });
+      const changed = [];
+      if (body.cost_center != null) { await sql`UPDATE expenses SET cost_center = ${String(body.cost_center)} WHERE id = ${eid}`; changed.push('cost_center'); }
+      if (body.category != null) { await sql`UPDATE expenses SET category = ${String(body.category)} WHERE id = ${eid}`; changed.push('category'); }
+      if (body.vendor != null) { await sql`UPDATE expenses SET vendor = ${String(body.vendor)} WHERE id = ${eid}`; changed.push('vendor'); }
+      if (body.description != null) { await sql`UPDATE expenses SET description = ${String(body.description)} WHERE id = ${eid}`; changed.push('description'); }
+      if (body.employee_name != null) { await sql`UPDATE expenses SET employee_name = ${String(body.employee_name)} WHERE id = ${eid}`; changed.push('employee_name'); }
+      if (body.employee_email != null) { await sql`UPDATE expenses SET employee_email = ${String(body.employee_email)} WHERE id = ${eid}`; changed.push('employee_email'); }
+      if (!changed.length) return res.status(400).json({ ok: false, error: 'No editable field provided' });
+      await sql`UPDATE expenses SET updated_at = now() WHERE id = ${eid}`;
+      const updated = (await sql`SELECT * FROM expenses WHERE id = ${eid}`)[0];
+      return res.json({ ok: true, changed, expense: updated });
+    }
+
     // --- unreject: recover a Rejected expense back to a chosen stage (admin only) ---
     if (action === 'unreject') {
       if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
