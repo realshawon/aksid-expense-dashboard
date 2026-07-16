@@ -52,6 +52,8 @@ const DEPARTMENTS = [
   { label: 'Sales Team - SIKA',      tag: 'Sales Team - SIKA' },
   { label: 'Institution Sales',      tag: 'Head Office' },
   { label: 'Retail Sales',           tag: 'Head Office' },
+  { label: 'Crossgate',              tag: 'Head Office' },
+  { label: 'Ortrio',                 tag: 'Head Office' },
 ];
 
 function resolveLedger(e) {
