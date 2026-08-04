@@ -603,6 +603,58 @@ export default async function handler(req, res) {
       return res.json({ ok: true, expense: updated });
     }
 
+    // --- bkashJournal: the Make settlement scenario calls this to post a bKash settlement
+    // journal DIRECTLY to Zoho Books (Make's own Zoho app cannot create journals — error 57).
+    // Needs env: ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN (Self Client, ZohoBooks.fullaccess.all).
+    // Body: { key, org: 'aksid'|'crossgate', date: 'YYYY-MM-DD', total, fee, net }
+    if (action === 'bkashJournal') {
+      if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
+      const ORGS = {
+        aksid:     { org_id: '898189923', wallet: '7058826000000567272', bank: '7058826000000567208', charge: '7058826000000462027',
+                     tags: [{ tag_id: '7058826000000000333', tag_option_id: '7058826000000792428' }] },
+        crossgate: { org_id: '915638435', wallet: '8646748000000115101', bank: '8646748000000115301', charge: '8646748000000127082', tags: [] },
+      };
+      const o = ORGS[String(body.org || 'aksid').toLowerCase()];
+      if (!o) return res.status(400).json({ ok: false, error: 'org must be aksid or crossgate' });
+      const date = String(body.date || ''); const total = Number(body.total), fee = Number(body.fee), net = Number(body.net);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ ok: false, error: 'date must be YYYY-MM-DD' });
+      if (!(total > 0) || !(net > 0) || !(fee >= 0) || Math.abs(total - (fee + net)) > 0.02)
+        return res.status(400).json({ ok: false, error: 'amounts invalid: total must equal fee + net' });
+      if (!process.env.ZOHO_REFRESH_TOKEN) return res.status(503).json({ ok: false, error: 'Zoho env vars not configured in Vercel yet' });
+      // 1) access token
+      const tokRes = await fetch('https://accounts.zoho.com/oauth/v2/token', {
+        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ grant_type: 'refresh_token', client_id: process.env.ZOHO_CLIENT_ID, client_secret: process.env.ZOHO_CLIENT_SECRET, refresh_token: process.env.ZOHO_REFRESH_TOKEN }),
+      });
+      const tok = await tokRes.json();
+      if (!tok.access_token) return res.status(502).json({ ok: false, error: 'Zoho token refresh failed' });
+      const zh = { Authorization: 'Zoho-oauthtoken ' + tok.access_token, 'Content-Type': 'application/json' };
+      const zbase = 'https://www.zohoapis.com/books/v3';
+      const REF = 'bKash settlement - auto journal';
+      // 2) dedupe: same reference + date + total already in this org?
+      const listRes = await fetch(zbase + '/journals?organization_id=' + o.org_id + '&reference_number=' + encodeURIComponent(REF) + '&per_page=200', { headers: zh });
+      const list = await listRes.json();
+      const dup = (list.journals || []).find(j => j.journal_date === date && Math.abs((j.total || 0) - total) < 0.01);
+      if (dup) return res.json({ ok: true, skipped: true, reason: 'already journaled', journal_id: dup.journal_id });
+      // 3) create draft (accrual only) + submit for approval
+      const DESC = 'Inter Transfer from Bkash Collection A/C';
+      const li = [
+        { account_id: o.bank,   debit_or_credit: 'debit',  amount: net, description: DESC, tags: o.tags },
+        { account_id: o.charge, debit_or_credit: 'debit',  amount: fee, description: 'bKash settlement fee', tags: o.tags },
+        { account_id: o.wallet, debit_or_credit: 'credit', amount: fee, description: DESC, tags: o.tags },
+        { account_id: o.wallet, debit_or_credit: 'credit', amount: net, description: DESC, tags: o.tags },
+      ].filter(l => l.amount > 0);
+      const crRes = await fetch(zbase + '/journals?organization_id=' + o.org_id, {
+        method: 'POST', headers: zh,
+        body: JSON.stringify({ journal_date: date, reference_number: REF, notes: DESC, status: 'draft', journal_type: 'accrual', line_items: li }),
+      });
+      const cr = await crRes.json();
+      if (cr.code !== 0 || !cr.journal) return res.status(502).json({ ok: false, error: 'Zoho create failed: ' + (cr.message || cr.code) });
+      const jid = cr.journal.journal_id;
+      const sub = await (await fetch(zbase + '/journals/' + jid + '/submit?organization_id=' + o.org_id, { method: 'POST', headers: zh })).json();
+      return res.json({ ok: true, journal_id: jid, entry_number: cr.journal.entry_number || null, submitted: sub.code === 0 });
+    }
+
     // --- addAttachment: attach a file to an EXISTING expense (viewable by current + all later approvers) ---
     if (action === 'addAttachment') {
       if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
