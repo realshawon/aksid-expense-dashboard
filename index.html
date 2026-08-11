@@ -109,6 +109,7 @@ tbody tr{cursor:pointer}tbody tr:hover{background:#f7f9fc}tbody tr:hover .reflin
 const ORDER=['Submitted','Manager','Audit','Accounts','Top Management or Others','Ready to Post','Posted'];
 const WITH={Manager:'Manager',Audit:'Audit team',Accounts:'Accounts','Top Management or Others':'Top Management or Others','Ready to Post':'Accounts · posting',Posted:'Done · in Zoho',Rejected:'Rejected'};
 const initials=n=>(n||'?').split(/\s+/).map(w=>w[0]).join('').slice(0,3).toUpperCase();
+const serialNum=r=>{const m=(r||'').match(/\d+/);return m?parseInt(m[0]):0;};
 
 function stepper(stage){
   if(stage==='Rejected'){
@@ -208,7 +209,7 @@ function render(){
   if(keys.includes(keep))sel.value=keep;
   const filter=sel.value;
   const sorted=[...ex].filter(e=>!filter||monthKey(e)===filter)
-    .sort((a,b)=>monthKey(b).localeCompare(monthKey(a))||new Date(b.expense_date||b.created_at||0)-new Date(a.expense_date||a.created_at||0));
+    .sort((a,b)=>monthKey(b).localeCompare(monthKey(a))||serialNum(a.ref)-serialNum(b.ref));
   if(!sorted.length){document.getElementById('trackWrap').innerHTML='<div class="empty">No submissions in '+monthLabel(filter)+'.</div>';return;}
   let rows='',lastKey=null;
   for(const e of sorted){
@@ -235,6 +236,16 @@ async function load(){
   }catch(err){setBanner(false,String(err));}
 }
 load();
+// Auto-refresh so the "Live Tracker" banner is actually true — was previously load-once-and-go-stale.
+// Skipped while a detail modal is open (don't yank data out from under someone reading it) or the
+// tab is backgrounded (no point polling a hidden tab); resumes immediately when the tab regains focus.
+const REFRESH_MS=30000;
+setInterval(()=>{
+  if(document.hidden)return;
+  if(document.getElementById('ovl').classList.contains('show'))return;
+  load();
+},REFRESH_MS);
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) load(); });
 </script>
 </body>
 </html>
