@@ -6,7 +6,7 @@ const sql = neon(process.env.DATABASE_URL);
 
 // Approval pipeline order. After the last one is approved → "Ready to Post" (Accounts reviews the
 // ledger/cost-center mapping and posts to Zoho manually) → "Posted".
-const STAGES = ['Manager', 'Audit', 'Accounts', 'Top Mgmt'];
+const STAGES = ['Manager', 'Audit', 'Accounts', 'Top Management or Others'];
 const READY = 'Ready to Post';
 
 // --- Zoho Books ledger map (source of truth = ZOHO_EXPENSE_MAPPING.md §2, org 898189923) ---
@@ -166,7 +166,7 @@ function approverEmail(expense, stage) {
   if (stage === 'Manager') return expense.manager_email || '';
   if (stage === 'Audit') return AUDIT_EMAIL;
   if (stage === 'Accounts') return ACCOUNTS_EMAIL;
-  if (stage === 'Top Mgmt') return TOPMGMT_EMAIL;
+  if (stage === 'Top Management or Others') return TOPMGMT_EMAIL;
   return '';
 }
 function allParties(expense) {

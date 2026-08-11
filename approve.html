@@ -66,7 +66,7 @@ async function loadExp(){
 }
 function render(){
   const cur=(exp.edited_amount!=null?exp.edited_amount:exp.amount);
-  const stages=exp.__stages||['Manager','Audit','Accounts','Top Mgmt'];
+  const stages=exp.__stages||['Manager','Audit','Accounts','Top Management or Others'];
   const roleIdx=stages.indexOf(role), curIdx=stages.indexOf(exp.stage);
   let actionHtml;
   if(exp.stage==='Rejected'){
@@ -81,7 +81,7 @@ function render(){
     actionHtml=`
       <div class="amt"><span class="k" style="color:#6b6b70">Approved amount</span><input id="ed" type="number" step="0.01" value="${cur}"></div>
       <label style="display:block;font-size:12px;color:#6b6b70;font-weight:600;margin:4px 0 4px">Comment (optional)</label>
-      <textarea id="cm" placeholder="Add a note${role==='Top Mgmt'?' — shown in the final summary email':''}" style="width:100%;font:inherit;padding:9px 11px;border:1px solid #d6dae1;border-radius:9px;min-height:54px;resize:vertical"></textarea>
+      <textarea id="cm" placeholder="Add a note${role==='Top Management or Others'?' — shown in the final summary email':''}" style="width:100%;font:inherit;padding:9px 11px;border:1px solid #d6dae1;border-radius:9px;min-height:54px;resize:vertical"></textarea>
       ${role==='Audit'?`<label style="display:flex;align-items:center;gap:8px;margin:10px 0 2px;font-size:13px;color:#1d1d1f;font-weight:600"><input type="checkbox" id="seal" style="width:auto;margin:0"> 🔖 Apply Audit Seal (verified by Audit)</label>`:''}
       <div class="btns"><button class="ap" onclick="act('approve')">Approve</button><button class="rj" onclick="act('reject')">Reject</button></div>`;
   }
