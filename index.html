@@ -235,6 +235,16 @@ async function load(){
   }catch(err){setBanner(false,String(err));}
 }
 load();
+// Auto-refresh so the "Live Tracker" banner is actually true — was previously load-once-and-go-stale.
+// Skipped while a detail modal is open (don't yank data out from under someone reading it) or the
+// tab is backgrounded (no point polling a hidden tab); resumes immediately when the tab regains focus.
+const REFRESH_MS=30000;
+setInterval(()=>{
+  if(document.hidden)return;
+  if(document.getElementById('ovl').classList.contains('show'))return;
+  load();
+},REFRESH_MS);
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) load(); });
 </script>
 </body>
 </html>
