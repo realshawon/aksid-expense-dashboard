@@ -209,7 +209,7 @@ function render(){
   if(keys.includes(keep))sel.value=keep;
   const filter=sel.value;
   const sorted=[...ex].filter(e=>!filter||monthKey(e)===filter)
-    .sort((a,b)=>monthKey(b).localeCompare(monthKey(a))||serialNum(a.ref)-serialNum(b.ref));
+    .sort((a,b)=>monthKey(b).localeCompare(monthKey(a))||serialNum(b.ref)-serialNum(a.ref));
   if(!sorted.length){document.getElementById('trackWrap').innerHTML='<div class="empty">No submissions in '+monthLabel(filter)+'.</div>';return;}
   let rows='',lastKey=null;
   for(const e of sorted){
