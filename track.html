@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AKSID Expense — Track</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<style>
+:root{color-scheme:light}*{box-sizing:border-box}
+body{margin:0;font-family:'Segoe UI',system-ui,Arial,sans-serif;background:#f4f6f9;color:#1d1d1f;font-size:14px}
+.wrap{max-width:560px;margin:0 auto;padding:20px}
+.logo{height:40px;margin-bottom:14px}
+.card{background:#fff;border:1px solid #e6e8ec;border-radius:14px;padding:20px}
+h1{font-size:18px;margin:0 0 2px}.sub{color:#6b6b70;font-size:12.5px;margin:0 0 16px}
+table{width:100%;border-collapse:collapse;font-size:13.5px;margin-bottom:8px}
+td{padding:7px 0;border-bottom:1px solid #f0f2f5}td.k{color:#6b6b70;width:38%}td.v{font-weight:600}
+.stage{display:inline-block;font-size:12px;font-weight:700;color:#1c52c0;background:#e7efff;padding:3px 10px;border-radius:20px}
+.msg{margin-top:16px;padding:12px 14px;border-radius:10px;font-size:13.5px;display:none}
+.msg.ok{background:#e6f4ea;color:#226b39;display:block}.msg.err{background:#fdeced;color:#a3242e;display:block}
+.muted{color:#9a9aa0;font-size:11.5px;margin-top:14px}.save{font-weight:700;color:#1d1d1f}
+a{color:#2a6df4;text-decoration:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <img class="logo" src="https://images.squarespace-cdn.com/content/v1/61b1d88771230e2244b14213/de522f80-4556-42c4-af20-e3687e746991/AKSID-HORIZONTAL-LOGO.png?format=750w" alt="AKSID">
+  <div class="card" id="card"><div class="sub">Loading expense…</div></div>
+</div>
+<script>
+const q=new URLSearchParams(location.search);
+const id=q.get('id');
+let exp=null;
+
+function money(n){return '৳'+Math.round(Number(n||0)).toLocaleString('en-US');}
+function stageLabel(s){return s==='Manager'?'Reporting':s;}
+function receiptsRow(exp){
+  let list=Array.isArray(exp.receipts)?exp.receipts:[];
+  if(!list.length&&exp.receipt_url)list=[{name:'Receipt',url:exp.receipt_url}];
+  if(!list.length)return '';
+  const links=list.map((r,i)=>`<a href="${r.url}" target="_blank">Open ${r.name||('Receipt '+(i+1))} ↗</a>`).join('<br>');
+  return `<tr><td class="k">Receipts</td><td class="v">${links}</td></tr>`;
+}
+function trailRows(exp){
+  const h=Array.isArray(exp.history)?exp.history:[];
+  const appr=h.filter(x=>x.action==='approved');
+  const items=appr.map(x=>`<div style="font-size:13px;margin:3px 0">✓ <b>${stageLabel(x.stage)}</b> ${money(x.amount)}${(x.by&&String(x.by).includes('@'))?` <span style="color:#9a9aa0">· ${x.by}</span>`:''}${x.sealed?` <span style="display:inline-block;background:#0e7490;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px">✔ AUDIT SEAL</span>`:''}${x.comment?` <span style="color:#6b6b70">— "${x.comment}"</span>`:''}</div>`).join('');
+  const waiting=(exp.stage==='Posted'||exp.stage==='Rejected')?'':`<div style="font-size:13px;margin:6px 0 0;color:#1c52c0;font-weight:600">⏳ Currently with: ${stageLabel(exp.stage)}</div>`;
+  if(!items && !waiting) return '';
+  return `<div style="margin:6px 0 14px"><div style="font-size:11px;color:#6b6b70;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin:0 0 4px">Approval status</div>${items}${waiting}</div>`;
+}
+
+async function loadExp(){
+  if(!id){document.getElementById('card').innerHTML='<div class="sub">No expense id in the link.</div>';return;}
+  const r=await fetch('/api?action=get&id='+encodeURIComponent(id),{cache:'no-store'});
+  const d=await r.json();
+  if(!d.ok){document.getElementById('card').innerHTML='<div class="sub">'+(d.error||'Not found')+'</div>';return;}
+  exp=d.expense;render();
+}
+function render(){
+  const cur=(exp.edited_amount!=null?exp.edited_amount:exp.amount);
+  let statusMsg;
+  if(exp.stage==='Rejected'){
+    statusMsg=`<div class="msg err">❌ This expense was <b>rejected</b>.</div>`;
+  }else if(exp.stage==='Posted'){
+    statusMsg=`<div class="msg ok">✅ Fully approved and <b>posted to Zoho Books</b>.</div>`;
+  }else{
+    statusMsg=`<div class="msg ok">⏳ In progress — currently with <b>${stageLabel(exp.stage)}</b>.</div>`;
+  }
+  document.getElementById('card').innerHTML=`
+    <h1>Expense ${exp.ref||('#'+exp.id)}</h1>
+    <p class="sub">Stage: <span class="stage">${stageLabel(exp.stage)}</span></p>
+    <table>
+      <tr><td class="k">Employee</td><td class="v">${exp.employee_name||'—'} ${exp.employee_id?('· ID '+exp.employee_id):''}</td></tr>
+      <tr><td class="k">Cost Center</td><td class="v">${exp.cost_center||'—'}</td></tr>
+      <tr><td class="k">Date</td><td class="v">${exp.expense_date?String(exp.expense_date).slice(0,10):'—'}</td></tr>
+      <tr><td class="k">Category</td><td class="v">${exp.category||'—'}</td></tr>
+      <tr><td class="k">Vendor</td><td class="v">${exp.vendor||'—'}</td></tr>
+      <tr><td class="k">Description</td><td class="v">${exp.description||'—'}</td></tr>
+      <tr><td class="k">Amount</td><td class="v">${money(cur)}</td></tr>
+      ${receiptsRow(exp)}
+    </table>
+    ${trailRows(exp)}
+    ${statusMsg}
+    <p class="muted">This is a read-only status page for your own submission. <span class="save">DO NOT PRINT — SAVE PAPER.</span></p>`;
+}
+loadExp();
+</script>
+</body>
+</html>
