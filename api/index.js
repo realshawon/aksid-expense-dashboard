@@ -83,6 +83,18 @@ function resolveDeptTag(costCenter) {
   return 'Head Office';
 }
 
+// Consolidated admin-key check. Warns (once per cold start) if ADMIN_KEY isn't set in the
+// environment, since the hardcoded fallback is public (it's in this source file) and anyone
+// who has seen the repo could use it — set ADMIN_KEY in Vercel env vars for real protection.
+let warnedDefaultKey = false;
+function checkAdminKey(req, body) {
+  if (!process.env.ADMIN_KEY && !warnedDefaultKey) {
+    warnedDefaultKey = true;
+    console.error('SECURITY: ADMIN_KEY env var is not set — falling back to the hardcoded default key. Set ADMIN_KEY in Vercel env vars.');
+  }
+  return (req.query.key || body.key) === (process.env.ADMIN_KEY || 'aksid-admin-2026');
+}
+
 function cors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
@@ -96,6 +108,7 @@ async function initDb() {
     employee_name TEXT,
     employee_id TEXT,
     employee_email TEXT,
+    employee_phone TEXT,
     cost_center TEXT,
     expense_date DATE,
     category TEXT,
@@ -392,8 +405,9 @@ function submittedConfirmEmail(e) {
 }
 
 async function postWebhook(url, payload) {
-  if (!url) return false;
+  if (!url) { console.error('postWebhook: no URL configured (env var unset) — payload dropped:', payload && (payload.event || payload.ref)); return false; }
   // Retry with backoff so a transient network/gateway blip doesn't drop the message.
+  let lastErr = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const r = await fetch(url, {
@@ -402,9 +416,11 @@ async function postWebhook(url, payload) {
         body: JSON.stringify(payload),
       });
       if (r.ok) return true;
-    } catch (e) { /* fall through to retry */ }
+      lastErr = 'HTTP ' + r.status;
+    } catch (e) { lastErr = e && e.message; /* fall through to retry */ }
     if (attempt < 2) await new Promise(r => setTimeout(r, 300 * (attempt + 1)));
   }
+  console.error('postWebhook: all retries failed for', url, '— event:', payload && (payload.event || payload.ref), '— last error:', lastErr);
   return false;
 }
 
@@ -430,10 +446,10 @@ async function postWebhookJson(url, payload) {
   if (!url) return null;
   try {
     const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    if (!r.ok) return null;
+    if (!r.ok) { console.error('postWebhookJson: HTTP', r.status, 'from', url, '— ref:', payload && payload.ref); return null; }
     const t = await r.text();
     try { return JSON.parse(t); } catch (_) { return { raw: t }; }
-  } catch (e) { return null; }
+  } catch (e) { console.error('postWebhookJson: request failed for', url, '— ref:', payload && payload.ref, '—', e && e.message); return null; }
 }
 function sanitizePart(s) {
   return String(s || '').trim().replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
@@ -520,7 +536,7 @@ export default async function handler(req, res) {
 
     // --- resend: re-send the current-stage approver email (fresh, correct link) ---
     if (action === 'resend') {
-      if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
+      if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });
       const rid = req.query.id || body.id;
       const rrows = await sql`SELECT * FROM expenses WHERE id = ${rid}`;
       if (!rrows.length) return res.status(404).json({ ok: false, error: 'Not found' });
@@ -542,7 +558,7 @@ export default async function handler(req, res) {
 
     // --- postqueue: fully-approved expenses awaiting Zoho posting, with suggested mapping (admin) ---
     if (action === 'postqueue') {
-      if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
+      if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });
       const rows = await sql`SELECT * FROM expenses WHERE stage = ${READY} ORDER BY updated_at ASC`;
       const out = rows.map(r => {
         const led = resolveLedger(r);
@@ -553,7 +569,7 @@ export default async function handler(req, res) {
 
     // --- postToZoho: Accounts confirms the mapping (and optional cost-center split) → write to Zoho ---
     if (action === 'postToZoho') {
-      if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
+      if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });
       const pid = req.query.id || body.id;
       const rows = await sql`SELECT * FROM expenses WHERE id = ${pid}`;
       if (!rows.length) return res.status(404).json({ ok: false, error: 'Not found' });
@@ -568,6 +584,15 @@ export default async function handler(req, res) {
       }
       lines = lines.map(l => ({ account_id: String(l.account_id || ''), account_name: String(l.account_name || ''), tag: String(l.tag || 'Head Office'), amount: Number(l.amount || 0) }));
       if (lines.some(l => !l.account_id || !(l.amount > 0))) return res.status(400).json({ ok: false, error: 'Every line needs an account and a positive amount.' });
+      // Every account_id/tag must be one of the ledgers/tags this app actually offers — otherwise a
+      // crafted request could post to a Zoho account never exposed in the posting-queue UI.
+      const validAccountIds = new Set(LEDGERS.map(l => l.account_id));
+      const validTags = new Set(DEPARTMENTS.map(d => d.tag));
+      const badLine = lines.find(l => !validAccountIds.has(l.account_id) || !validTags.has(l.tag));
+      if (badLine) return res.status(400).json({ ok: false, error: 'Unknown ledger account or department tag: ' + (badLine.account_id) + ' / ' + badLine.tag });
+      // Trust our own ledger name over whatever account_name the client sent — account_id is the
+      // only thing that's actually validated above, so re-derive the display name from it.
+      lines = lines.map(l => ({ ...l, account_name: (LEDGERS.find(x => x.account_id === l.account_id) || {}).account || l.account_name }));
       const sum = lines.reduce((s, l) => s + l.amount, 0);
       if (Math.abs(sum - total) > 0.01) return res.status(400).json({ ok: false, error: 'Lines total ' + sum.toFixed(2) + ' but the approved amount is ' + total.toFixed(2) + '.' });
       // receipts go along so Make can attach them to the Zoho expense
@@ -608,7 +633,7 @@ export default async function handler(req, res) {
     // Needs env: ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN (Self Client, ZohoBooks.fullaccess.all).
     // Body: { key, org: 'aksid'|'crossgate', date: 'YYYY-MM-DD', total, fee, net }
     if (action === 'bkashJournal') {
-      if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
+      if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });
       const ORGS = {
         aksid:     { org_id: '898189923', wallet: '7058826000000567272', bank: '7058826000000567208', charge: '7058826000000462027',
                      tags: [{ tag_id: '7058826000000000333', tag_option_id: '7058826000000792428' }] },
@@ -651,13 +676,23 @@ export default async function handler(req, res) {
       const cr = await crRes.json();
       if (cr.code !== 0 || !cr.journal) return res.status(502).json({ ok: false, error: 'Zoho create failed: ' + (cr.message || cr.code) });
       const jid = cr.journal.journal_id;
-      const sub = await (await fetch(zbase + '/journals/' + jid + '/submit?organization_id=' + o.org_id, { method: 'POST', headers: zh })).json();
+      // The draft journal now EXISTS in Zoho (jid) even if the submit-for-approval call below fails —
+      // wrap it so a network blip can't silently strand the journal in draft with no trace. On failure
+      // we still report jid + submitted:false so the caller (or a retry) can submit it explicitly rather
+      // than re-creating a duplicate (the dedupe check above would just find this same draft next time).
+      let sub = { code: -1 };
+      try {
+        sub = await (await fetch(zbase + '/journals/' + jid + '/submit?organization_id=' + o.org_id, { method: 'POST', headers: zh })).json();
+      } catch (e) {
+        console.error('bkashJournal: journal', jid, 'created but submit-for-approval failed:', e && e.message, '— it is stuck in Zoho draft status, submit it manually.');
+      }
+      if (sub.code !== 0) console.error('bkashJournal: journal', jid, 'left in draft — submit response:', sub);
       return res.json({ ok: true, journal_id: jid, entry_number: cr.journal.entry_number || null, submitted: sub.code === 0 });
     }
 
     // --- addAttachment: attach a file to an EXISTING expense (viewable by current + all later approvers) ---
     if (action === 'addAttachment') {
-      if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
+      if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });
       const tid = req.query.id || body.id;
       const trows = await sql`SELECT * FROM expenses WHERE id = ${tid}`;
       if (!trows.length) return res.status(404).json({ ok: false, error: 'Not found' });
@@ -743,9 +778,14 @@ export default async function handler(req, res) {
     // --- submit: create a new expense (from the form / Make / web) ---
     if (action === 'submit') {
       const e = body;
+      // Guard: without a manager_email the expense would silently sit at "Manager" stage
+      // forever with nobody notified (approverEmail() returns '' and postNotify() skips silently).
+      if (!e.manager_email || !/.+@.+\..+/.test(String(e.manager_email).trim())) {
+        return res.status(400).json({ ok: false, error: 'manager_email is required and must be a valid email address.' });
+      }
       const inserted = await sql`INSERT INTO expenses
-        (employee_name, employee_id, employee_email, cost_center, expense_date, category, category_key, vendor, description, amount, receipt_url, manager_email, stage, history)
-        VALUES (${e.employee_name || ''}, ${e.employee_id || ''}, ${e.employee_email || ''}, ${e.cost_center || ''},
+        (employee_name, employee_id, employee_email, employee_phone, cost_center, expense_date, category, category_key, vendor, description, amount, receipt_url, manager_email, stage, history)
+        VALUES (${e.employee_name || ''}, ${e.employee_id || ''}, ${e.employee_email || ''}, ${e.employee_phone || ''}, ${e.cost_center || ''},
                 ${e.expense_date || null}, ${e.category || ''}, ${e.category_key || null}, ${e.vendor || ''}, ${e.description || ''},
                 ${e.amount || 0}, ${e.receipt_url || ''}, ${e.manager_email || ''}, 'Manager',
                 ${JSON.stringify([{ stage: 'Submitted', at: new Date().toISOString(), by: e.employee_name || '' }])}::jsonb)
@@ -776,13 +816,14 @@ export default async function handler(req, res) {
       }
       // notify (current approver = Manager)
       const em0 = stepEmail(row, 'Manager');
-      await postNotify({ event: 'submitted', expense: row, stage: 'Manager', to: toList([approverEmail(row, 'Manager')]), bcc: BCC_IT, email_subject: em0.subject, email_html: em0.html });
+      const notifyOk = await postNotify({ event: 'submitted', expense: row, stage: 'Manager', to: toList([approverEmail(row, 'Manager')]), bcc: BCC_IT, email_subject: em0.subject, email_html: em0.html });
+      if (!notifyOk) console.error('submit: approver notification failed for', row.ref, '— manager_email:', row.manager_email);
       // confirm to the submitter that we received their expense (they get a mail on every submission)
       if (row.employee_email) {
         const sc = submittedConfirmEmail(row);
         await postNotify({ event: 'submitted_confirm', expense: row, stage: 'Manager', to: toList([row.employee_email]), bcc: BCC_IT, email_subject: sc.subject, email_html: sc.html });
       }
-      return res.json({ ok: true, expense: row });
+      return res.json({ ok: true, expense: row, notify_ok: notifyOk });
     }
 
     // --- approve: advance the stage; on final approval, post to Zoho via Make ---
@@ -820,26 +861,28 @@ export default async function handler(req, res) {
 
       const updated = (await sql`SELECT * FROM expenses WHERE id = ${id}`)[0];
 
+      let notifyOk;
       if (isFinal) {
         // Fully approved → hold for Accounts posting review (ledger, cost-center split, attachment
         // are all confirmed by a human on post.html before anything reaches Zoho).
         const rp = readyToPostEmail(updated);
-        await postNotify({ event: 'ready_to_post', expense: updated, stage: READY, to: toList([ACCOUNTS_EMAIL, ACCOUNTS2_EMAIL]), bcc: BCC_IT, email_subject: rp.subject, email_html: rp.html });
+        notifyOk = await postNotify({ event: 'ready_to_post', expense: updated, stage: READY, to: toList([ACCOUNTS_EMAIL, ACCOUNTS2_EMAIL]), bcc: BCC_IT, email_subject: rp.subject, email_html: rp.html });
       } else {
         const em = stepEmail(updated, nextStage);
-        await postNotify({ event: 'advanced', expense: updated, stage: nextStage, to: toList([approverEmail(updated, nextStage)]), bcc: BCC_IT, email_subject: em.subject, email_html: em.html });
+        notifyOk = await postNotify({ event: 'advanced', expense: updated, stage: nextStage, to: toList([approverEmail(updated, nextStage)]), bcc: BCC_IT, email_subject: em.subject, email_html: em.html });
       }
+      if (!notifyOk) console.error('approve: next-approver notification failed for', updated.ref, '— stage:', nextStage);
       // keep the submitter informed on every approval (IT on BCC); the posted summary comes later
       if (updated.employee_email) {
         const su = submitterUpdateEmail(updated, row.stage, nextStage);
         await postNotify({ event: 'submitter_update', expense: updated, stage: nextStage, to: toList([updated.employee_email]), bcc: BCC_IT, email_subject: su.subject, email_html: su.html });
       }
-      return res.json({ ok: true, expense: updated });
+      return res.json({ ok: true, expense: updated, notify_ok: notifyOk });
     }
 
     // --- setManager: change manager_email of an expense (and re-send if currently at Manager) ---
     if (action === 'setManager') {
-      if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
+      if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });
       const sid = req.query.id || body.id;
       const newEmail = (req.query.email || body.email || '').toString().trim();
       if (!newEmail) return res.status(400).json({ ok: false, error: 'email required' });
@@ -858,7 +901,7 @@ export default async function handler(req, res) {
 
     // --- edit: admin correction of safe fields on an existing expense ---
     if (action === 'edit') {
-      if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
+      if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });
       const eid = req.query.id || body.id;
       const erows = await sql`SELECT * FROM expenses WHERE id = ${eid}`;
       if (!erows.length) return res.status(404).json({ ok: false, error: 'Not found' });
@@ -877,7 +920,7 @@ export default async function handler(req, res) {
 
     // --- unreject: recover a Rejected expense back to a chosen stage (admin only) ---
     if (action === 'unreject') {
-      if ((req.query.key || body.key) !== (process.env.ADMIN_KEY || 'aksid-admin-2026')) return res.status(403).json({ ok: false, error: 'Forbidden' });
+      if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });
       const uid = req.query.id || body.id;
       const target = (req.query.stage || body.stage || 'Manager').toString();
       if (!STAGES.includes(target)) return res.status(400).json({ ok: false, error: 'Bad stage: ' + target });

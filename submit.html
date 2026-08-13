@@ -37,7 +37,9 @@ button{width:100%;font:inherit;font-weight:700;border:none;border-radius:10px;pa
     <label>Expense Category</label><select id="category"><option value="">Loading categories…</option></select>
     <label>Vendor Name</label><input id="vendor">
     <label>Description / Purpose</label><textarea id="description"></textarea>
-    <div class="row"><div><label>Your Email</label><input id="employee_email" type="email"></div><div><label>Manager / Reporting Email (approver)</label><input id="manager_email" type="email" placeholder="e.g. marketing@aksidcorp.com"></div></div>
+    <div class="row"><div><label>Your Email</label><input id="employee_email" type="email"></div><div><label>Manager / Reporting Email (approver) *</label><input id="manager_email" type="email" required placeholder="e.g. marketing@aksidcorp.com"></div></div>
+    <label>Your WhatsApp Number</label><input id="employee_phone" type="tel" placeholder="+88XXXXXXXXXX" pattern="^\+?88\d{10}$">
+    <p class="muted" style="margin-top:4px">Optional: for approval updates via WhatsApp</p>
     <label>Receipts / Documents (upload — you can pick several)</label><input id="receipt_file" type="file" multiple accept="image/*,.pdf,.heic,.png,.jpg,.jpeg">
     <p class="muted" style="margin-top:4px">Attach one or more files — each viewable by every approver from the email/approval page. Photos are auto-compressed; PDFs max 4 MB each. Or paste a link below instead.</p>
     <label>Receipt URL (optional, if no file)</label><input id="receipt_url" placeholder="link to the receipt">
@@ -47,7 +49,7 @@ button{width:100%;font:inherit;font-weight:700;border:none;border-radius:10px;pa
   </div>
 </div>
 <script>
-const F=['employee_name','employee_id','cost_center','expense_date','amount','category','vendor','description','employee_email','manager_email','receipt_url'];
+const F=['employee_name','employee_id','cost_center','expense_date','amount','category','vendor','description','employee_email','manager_email','employee_phone','receipt_url'];
 // Dropdowns come from the backend so the lists live in exactly one place (api config)
 (async function loadConfig(){
   try{
@@ -94,6 +96,7 @@ async function submitExpense(){
   if(!body.employee_name||!body.amount){m.className='msg err';m.textContent='Please enter at least your name and the amount.';btn.disabled=false;return;}
   if(!body.category_key){m.className='msg err';m.textContent='Please select an expense category.';btn.disabled=false;return;}
   if(!body.cost_center){m.className='msg err';m.textContent='Please select your department / cost center.';btn.disabled=false;return;}
+  if(!body.manager_email||!/.+@.+\..+/.test(body.manager_email)){m.className='msg err';m.textContent='Manager / Reporting Email is required — without it nobody gets notified and your claim will get stuck.';btn.disabled=false;return;}
   const fi=document.getElementById('receipt_file');const files=fi&&fi.files?Array.from(fi.files):[];
   try{
     if(files.length){
@@ -116,7 +119,11 @@ async function submitExpense(){
     const d=await r.json();
     if(!d.ok){m.className='msg err';m.textContent=d.error||'Failed';btn.disabled=false;return;}
     const nr=(d.expense.receipts&&d.expense.receipts.length)||0;
-    m.className='msg ok';m.innerHTML='✅ Submitted as <b>'+d.expense.ref+'</b>'+(nr?(' with '+nr+' receipt'+(nr>1?'s':'')+' attached'):'')+'. It is now with your Manager / Reporting for approval.';
+    if(d.notify_ok===false){
+      m.className='msg err';m.innerHTML='⚠️ Submitted as <b>'+d.expense.ref+'</b>, but the notification email to your manager could not be sent. Please tell them directly, or contact IT — otherwise this may sit unapproved.';
+    }else{
+      m.className='msg ok';m.innerHTML='✅ Submitted as <b>'+d.expense.ref+'</b>'+(nr?(' with '+nr+' receipt'+(nr>1?'s':'')+' attached'):'')+'. It is now with your Manager / Reporting for approval.';
+    }
     F.forEach(k=>document.getElementById(k).value='');if(fi)fi.value='';
     {const oth=document.getElementById('cost_center_other');oth.value='';oth.style.display='none';}
   }catch(e){m.className='msg err';m.textContent=String(e);}
