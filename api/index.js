@@ -200,7 +200,7 @@ const BCC_IT = [{ address: IT_EMAIL }];
 
 function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function money(n) { return '৳' + Math.round(Number(n || 0)).toLocaleString('en-US'); }
-function stageLabel(s) { return s === 'Manager' ? 'Reporting' : (s === READY ? 'Accounts — posting to Zoho' : s); }
+function stageLabel(s) { return s === 'Manager' ? 'Concern Department Head' : (s === READY ? 'Accounts — posting to Zoho' : s); }
 // Rich note for Zoho (employee · dept · purpose · vendor) so the posted expense reads the same as a manual entry
 function zohoNotes(e) {
   // Zoho/Make caps the Description at 100 chars — keep it concise: employee · dept · category · vendor

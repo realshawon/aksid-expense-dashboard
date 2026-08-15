@@ -34,7 +34,7 @@ const id=q.get('id');
 let exp=null;
 
 function money(n){return '৳'+Math.round(Number(n||0)).toLocaleString('en-US');}
-function stageLabel(s){return s==='Manager'?'Reporting':s;}
+function stageLabel(s){return s==='Manager'?'Concern Department Head':s;}
 function receiptsRow(exp){
   let list=Array.isArray(exp.receipts)?exp.receipts:[];
   if(!list.length&&exp.receipt_url)list=[{name:'Receipt',url:exp.receipt_url}];

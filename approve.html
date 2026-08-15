@@ -40,7 +40,7 @@ const role=q.get('role')||'approver';
 let exp=null;
 
 function money(n){return '৳'+Math.round(Number(n||0)).toLocaleString('en-US');}
-function stageLabel(s){return s==='Manager'?'Reporting':s;}
+function stageLabel(s){return s==='Manager'?'Concern Department Head':s;}
 function receiptsRow(exp){
   let list=Array.isArray(exp.receipts)?exp.receipts:[];
   if(!list.length&&exp.receipt_url)list=[{name:'Receipt',url:exp.receipt_url}];
@@ -73,6 +73,8 @@ function render(){
     actionHtml=`<div class="msg err">❌ This expense was <b>rejected</b>. No action needed.</div>`;
   }else if(exp.stage==='Posted'){
     actionHtml=`<div class="msg ok">✅ Fully approved and <b>posted to Zoho Books</b>. No action needed.</div>`;
+  }else if(exp.stage==='Ready to Post'){
+    actionHtml=`<div class="msg ok">✅ Fully approved by everyone in the chain — now with Accounts for posting to Zoho Books. No action needed from you.</div>`;
   }else if(roleIdx!==-1&&curIdx!==-1&&roleIdx<curIdx){
     actionHtml=`<div class="msg ok">✅ You have already approved this as <b>${stageLabel(role)}</b>. It has moved on and is now with <b>${stageLabel(exp.stage)}</b>.</div>`;
   }else if(roleIdx!==-1&&curIdx!==-1&&roleIdx>curIdx){
@@ -103,22 +105,34 @@ function render(){
     <div class="msg" id="msg"></div>
     <p class="muted">Approving advances to the next stage. The final approval posts the expense to Zoho Books automatically. <span class="save">DO NOT PRINT — SAVE PAPER.</span></p>`;
 }
+let BUSY=false;
 async function act(a){
-  const m=document.getElementById('msg');m.className='msg';m.textContent='Working…';m.style.display='block';
+  if(BUSY)return; // guards against a fast double-click firing two requests before the first response lands
+  const m=document.getElementById('msg');
   const ed=document.getElementById('ed');
   const cm=document.getElementById('cm');
   const seal=document.getElementById('seal');
+  if(a==='approve'&&ed){
+    const v=Number(ed.value);
+    if(!(v>0)){m.className='msg err';m.textContent='Approved amount must be greater than 0.';m.style.display='block';return;}
+  }
+  if(a==='reject'){
+    if(!confirm('Reject this expense? This cannot be undone.'))return;
+  }
+  BUSY=true;
+  const btns=document.querySelectorAll('.btns button');btns.forEach(b=>b.disabled=true);
+  m.className='msg';m.textContent='Working…';m.style.display='block';
   const body={action:a,id:exp.id,by:role,editedAmount:ed?ed.value:undefined,comment:cm?cm.value:undefined,auditSeal:seal?seal.checked:undefined};
   if(a==='reject'){body.reason=prompt('Reason for rejection (optional):')||'';}
   try{
     const r=await fetch('/api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const d=await r.json();
-    if(!d.ok){m.className='msg err';m.textContent=d.error||'Failed';return;}
+    if(!d.ok){m.className='msg err';m.textContent=d.error||'Failed';btns.forEach(b=>b.disabled=false);BUSY=false;return;}
     exp=d.expense;
     m.className='msg ok';
     m.innerHTML=(a==='approve'? (exp.stage==='Posted'?'✅ Final approval done — posted to Zoho Books.':'✅ Approved. Now with: <b>'+exp.stage+'</b>.') : '↩️ Rejected.');
-    setTimeout(render,1500);
-  }catch(e){m.className='msg err';m.textContent=String(e);}
+    setTimeout(()=>{BUSY=false;render();},1500);
+  }catch(e){m.className='msg err';m.textContent=String(e);btns.forEach(b=>b.disabled=false);BUSY=false;}
 }
 loadExp();
 </script>
