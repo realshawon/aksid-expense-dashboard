@@ -134,6 +134,7 @@ async function initDb() {
     created_at TIMESTAMPTZ DEFAULT now()
   )`;
   await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS receipts JSONB DEFAULT '[]'::jsonb`;
+  await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS employee_phone TEXT`;
   await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS category_key TEXT`;      // dropdown key → LEDGERS
   await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS posting JSONB`;          // final lines posted to Zoho
   // Payment settlement (after Zoho posting): Accounts marks Paid → submitter confirms Received.
