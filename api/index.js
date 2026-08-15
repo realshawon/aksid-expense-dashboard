@@ -938,6 +938,17 @@ export default async function handler(req, res) {
       return res.json({ ok: true, message: 'Recovered ' + uu.ref + ' back to ' + target });
     }
 
+    // --- delete: permanently remove a test/mistaken submission (admin only) ---
+    if (action === 'delete') {
+      if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });
+      const did = req.query.id || body.id;
+      const drows = await sql`SELECT * FROM expenses WHERE id = ${did}`;
+      if (!drows.length) return res.status(404).json({ ok: false, error: 'Not found' });
+      await sql`DELETE FROM attachments WHERE expense_id = ${did}`;
+      await sql`DELETE FROM expenses WHERE id = ${did}`;
+      return res.json({ ok: true, message: 'Deleted ' + drows[0].ref });
+    }
+
     // --- reject ---
     if (action === 'reject') {
       const id = body.id || req.query.id;
