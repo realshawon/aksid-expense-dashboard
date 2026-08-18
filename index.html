@@ -86,10 +86,13 @@ tbody tr{cursor:pointer}tbody tr:hover{background:#f7f9fc}tbody tr:hover .reflin
     <div class="card"><div class="lbl">Posted to Zoho</div><div class="val" id="kPosted">—</div><div class="note">fully approved &amp; recorded</div></div>
     <div class="card"><div class="lbl">Rejected</div><div class="val" id="kRej">—</div><div class="note">sent back</div></div>
     <div class="card"><div class="lbl">Total submissions</div><div class="val" id="kTotal">—</div><div class="note">in the system</div></div>
+    <a href="submit.html" style="text-decoration:none;display:flex;align-items:center;justify-content:center;background:#2a6df4;color:#fff;border-radius:12px;padding:14px 16px;font-weight:700;font-size:14px">+ New Submission</a>
   </div>
 
   <div class="panel">
-    <h2>Submission &amp; approval tracker <span class="tag">Live</span> <button class="r" onclick="exportExcel()" style="margin-left:auto">⬇ Export Excel</button><button class="r" onclick="load()">↻ Refresh</button></h2>
+    <h2>Submission &amp; approval tracker <span class="tag">Live</span>
+      <input id="searchBox" type="text" placeholder="Search ref, name, vendor, category…" oninput="render()" style="margin-left:auto;font:inherit;font-size:13px;padding:9px 12px;border:1px solid #d6dae1;border-radius:9px;min-width:240px">
+      <button class="r" onclick="exportExcel()">⬇ Export Excel</button><button class="r" onclick="load()">↻ Refresh</button></h2>
     <div id="trackWrap"><div class="empty">Loading…</div></div>
     <div class="legend">
       <span><span class="lg" style="background:#2e9d4f"></span>Approved / passed</span>
@@ -218,9 +221,12 @@ function render(){
   if(depts.includes(deptKeep))dsel.value=deptKeep;
   const deptFilter=dsel.value;
 
-  const sorted=[...ex].filter(e=>(!filter||monthKey(e)===filter)&&(!deptFilter||(e.cost_center||'—')===deptFilter))
+  const q=(document.getElementById('searchBox').value||'').trim().toLowerCase();
+  const matchesSearch=e=>!q||[e.ref,e.employee_name,e.vendor,e.category,e.cost_center].some(v=>String(v||'').toLowerCase().includes(q));
+
+  const sorted=[...ex].filter(e=>(!filter||monthKey(e)===filter)&&(!deptFilter||(e.cost_center||'—')===deptFilter)&&matchesSearch(e))
     .sort((a,b)=>monthKey(b).localeCompare(monthKey(a))||serialNum(b.ref)-serialNum(a.ref));
-  if(!sorted.length){document.getElementById('trackWrap').innerHTML='<div class="empty">No submissions'+(deptFilter?' in '+esc(deptFilter):'')+(filter?' for '+monthLabel(filter):'')+'.</div>';return;}
+  if(!sorted.length){document.getElementById('trackWrap').innerHTML='<div class="empty">No submissions'+(deptFilter?' in '+esc(deptFilter):'')+(filter?' for '+monthLabel(filter):'')+(q?' matching "'+esc(q)+'"':'')+'.</div>';return;}
   let rows='',lastKey=null;
   for(const e of sorted){
     const k=monthKey(e);
