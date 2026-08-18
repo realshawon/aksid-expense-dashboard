@@ -160,7 +160,7 @@ async function postIt(id,total){
       body:JSON.stringify({action:'postToZoho',id,key:KEY,by:'Accounts',lines:getLines(id)})});
     const d=await r.json();
     if(!d.ok){m.className='msg err';m.textContent=d.error||'Failed';btn.disabled=false;return;}
-    m.className='msg ok';m.textContent='✅ Posted to Zoho Books as '+d.expense.ref+'. Summary email sent.';
+    m.className='msg ok';m.textContent='✅ Posting done — '+d.expense.ref+' posted to Zoho Books. Summary email sent.';
     setTimeout(()=>{const c=document.getElementById('exp'+id);if(c)c.remove();},1800);
   }catch(e){m.className='msg err';m.textContent=String(e);btn.disabled=false;}
 }
