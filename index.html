@@ -71,6 +71,7 @@ tbody tr{cursor:pointer}tbody tr:hover{background:#f7f9fc}tbody tr:hover .reflin
   <div class="topbar">
     <img class="logo" src="https://images.squarespace-cdn.com/content/v1/61b1d88771230e2244b14213/de522f80-4556-42c4-af20-e3687e746991/AKSID-HORIZONTAL-LOGO.png?format=750w" alt="AKSID Corporation Limited">
     <div class="titlebox"><h1>Expense — Live Tracker</h1><p class="sub">AKSID Corporation Limited · who submitted, who it's with, what stage · live</p></div>
+    <select id="deptFilter" class="monthsel" onchange="render()"><option value="">All departments</option></select>
     <select id="monthFilter" class="monthsel" onchange="render()"><option value="">All months</option></select>
   </div>
 
@@ -208,9 +209,17 @@ function render(){
   sel.innerHTML='<option value="">All months</option>'+keys.map(k=>`<option value="${k}">${monthLabel(k)}</option>`).join('');
   if(keys.includes(keep))sel.value=keep;
   const filter=sel.value;
-  const sorted=[...ex].filter(e=>!filter||monthKey(e)===filter)
+
+  const dsel=document.getElementById('deptFilter');
+  const deptKeep=dsel.value;
+  const depts=[...new Set(ex.map(e=>e.cost_center||'—'))].sort((a,b)=>a.localeCompare(b));
+  dsel.innerHTML='<option value="">All departments</option>'+depts.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
+  if(depts.includes(deptKeep))dsel.value=deptKeep;
+  const deptFilter=dsel.value;
+
+  const sorted=[...ex].filter(e=>(!filter||monthKey(e)===filter)&&(!deptFilter||(e.cost_center||'—')===deptFilter))
     .sort((a,b)=>monthKey(b).localeCompare(monthKey(a))||serialNum(b.ref)-serialNum(a.ref));
-  if(!sorted.length){document.getElementById('trackWrap').innerHTML='<div class="empty">No submissions in '+monthLabel(filter)+'.</div>';return;}
+  if(!sorted.length){document.getElementById('trackWrap').innerHTML='<div class="empty">No submissions'+(deptFilter?' in '+esc(deptFilter):'')+(filter?' for '+monthLabel(filter):'')+'.</div>';return;}
   let rows='',lastKey=null;
   for(const e of sorted){
     const k=monthKey(e);
