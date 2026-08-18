@@ -7,6 +7,7 @@
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 :root{color-scheme:light}
 *{box-sizing:border-box}
@@ -88,7 +89,7 @@ tbody tr{cursor:pointer}tbody tr:hover{background:#f7f9fc}tbody tr:hover .reflin
   </div>
 
   <div class="panel">
-    <h2>Submission &amp; approval tracker <span class="tag">Live</span> <button class="r" onclick="load()" style="margin-left:auto">↻ Refresh</button></h2>
+    <h2>Submission &amp; approval tracker <span class="tag">Live</span> <button class="r" onclick="exportExcel()" style="margin-left:auto">⬇ Export Excel</button><button class="r" onclick="load()">↻ Refresh</button></h2>
     <div id="trackWrap"><div class="empty">Loading…</div></div>
     <div class="legend">
       <span><span class="lg" style="background:#2e9d4f"></span>Approved / passed</span>
@@ -234,6 +235,36 @@ function render(){
   }
   document.getElementById('trackWrap').innerHTML='<table><thead><tr><th>Ref</th><th>Submitter</th><th>Dept</th><th>Category</th><th>Stage</th><th>Currently with</th></tr></thead><tbody>'+rows+'</tbody></table>';
 }
+function exportExcel(){
+  if(!ALL_EX.length){alert('No data to export yet.');return;}
+  const dsel=document.getElementById('deptFilter'),msel=document.getElementById('monthFilter');
+  const deptFilter=dsel?dsel.value:'',monthFilter=msel?msel.value:'';
+  const filtered=ALL_EX.filter(e=>(!monthFilter||monthKey(e)===monthFilter)&&(!deptFilter||(e.cost_center||'—')===deptFilter));
+  if(!filtered.length){alert('No data to export for the current filter.');return;}
+  const byMonth={};
+  for(const e of filtered){const k=monthKey(e);(byMonth[k]=byMonth[k]||[]).push(e);}
+  const wb=XLSX.utils.book_new();
+  const keys=Object.keys(byMonth).sort((a,b)=>b.localeCompare(a));
+  for(const k of keys){
+    const rows=byMonth[k].sort((a,b)=>serialNum(b.ref)-serialNum(a.ref)).map(e=>({
+      'Ref':e.ref||('#'+e.id),
+      'Submitter':e.employee_name||'—',
+      'Department':e.cost_center||'—',
+      'Category':e.category||'—',
+      'Vendor':e.vendor||'—',
+      'Amount (BDT)':Number(e.edited_amount!=null?e.edited_amount:e.amount)||0,
+      'Stage':stageLabelForExport(e.stage),
+      'Currently With':WITH[e.stage]||e.stage,
+      'Expense Date':e.expense_date?String(e.expense_date).slice(0,10):'—'
+    }));
+    const ws=XLSX.utils.json_to_sheet(rows);
+    const sheetName=monthLabel(k).replace(/[\\/?*[\]:]/g,'-').slice(0,31);
+    XLSX.utils.book_append_sheet(wb,ws,sheetName);
+  }
+  const stamp=new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb,'AKSID-Expenses-'+stamp+'.xlsx');
+}
+function stageLabelForExport(s){return s==='Manager'?'Concern Department Head':s;}
 async function load(){
   try{
     const r=await fetch('/api?action=list',{cache:'no-store'});
