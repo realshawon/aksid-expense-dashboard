@@ -197,6 +197,15 @@ async function openDetail(id){
       ${settle}`;
   }catch(err){box.innerHTML='<button class="mclose" onclick="closeDetail()">✕</button><div class="empty">'+String(err)+'</div>';}
 }
+const DEPT_ALIASES={
+  'marketing & branding':'Marketing and Brand','marketing and branding':'Marketing and Brand','marketing and brand':'Marketing and Brand','marketing & brand':'Marketing and Brand',
+  'project sales department':'Project Sales','project sales':'Project Sales',
+  'management expense':'Management','management':'Management',
+  'finance & accounts':'Finance and Accounts','finance and accounts':'Finance and Accounts',
+  'mis/it':'MIS / IT','mis / it':'MIS / IT','mis':'MIS / IT',
+  'hr':'Human Resources','human resources':'Human Resources',
+};
+const canonDept=name=>{const n=String(name||'').trim();if(!n)return '—';const hit=DEPT_ALIASES[n.toLowerCase()];return hit||n;};
 const monthKey=e=>{const d=e.expense_date||e.created_at;if(!d)return '9999-99';const dt=new Date(d);return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0');};
 const monthLabel=k=>k==='9999-99'?'No date':new Date(k+'-01').toLocaleString('en-US',{month:'long',year:'numeric'});
 let ALL_EX=[];
@@ -216,7 +225,7 @@ function render(){
 
   const dsel=document.getElementById('deptFilter');
   const deptKeep=dsel.value;
-  const depts=[...new Set(ex.map(e=>e.cost_center||'—'))].sort((a,b)=>a.localeCompare(b));
+  const depts=[...new Set(ex.map(e=>canonDept(e.cost_center)))].sort((a,b)=>a.localeCompare(b));
   dsel.innerHTML='<option value="">All departments</option>'+depts.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
   if(depts.includes(deptKeep))dsel.value=deptKeep;
   const deptFilter=dsel.value;
@@ -224,7 +233,7 @@ function render(){
   const q=(document.getElementById('searchBox').value||'').trim().toLowerCase();
   const matchesSearch=e=>!q||[e.ref,e.employee_name,e.vendor,e.category,e.cost_center].some(v=>String(v||'').toLowerCase().includes(q));
 
-  const sorted=[...ex].filter(e=>(!filter||monthKey(e)===filter)&&(!deptFilter||(e.cost_center||'—')===deptFilter)&&matchesSearch(e))
+  const sorted=[...ex].filter(e=>(!filter||monthKey(e)===filter)&&(!deptFilter||canonDept(e.cost_center)===deptFilter)&&matchesSearch(e))
     .sort((a,b)=>monthKey(b).localeCompare(monthKey(a))||serialNum(b.ref)-serialNum(a.ref));
   if(!sorted.length){document.getElementById('trackWrap').innerHTML='<div class="empty">No submissions'+(deptFilter?' in '+esc(deptFilter):'')+(filter?' for '+monthLabel(filter):'')+(q?' matching "'+esc(q)+'"':'')+'.</div>';return;}
   let rows='',lastKey=null;
@@ -234,7 +243,7 @@ function render(){
     rows+=`<tr onclick="openDetail(${e.id})">
       <td><span class="reflink">${e.ref||('#'+e.id)}</span></td>
       <td><span class="avatar">${initials(e.employee_name)}</span>${e.employee_name||'—'}</td>
-      <td>${e.cost_center||'—'}</td>
+      <td>${esc(canonDept(e.cost_center))}</td>
       <td>${e.category||'—'}</td>
       <td>${stepper(e.stage)}</td>
       <td>${withPill(e)}</td></tr>`;
