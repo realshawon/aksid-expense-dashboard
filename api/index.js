@@ -629,6 +629,24 @@ export default async function handler(req, res) {
       return res.json({ ok: true, expense: updated });
     }
 
+    // --- markPosted: Accounts posts the expense in Zoho Books themselves (outside this app),
+    // then just confirms it here — no automatic Zoho API call, just updates our own record/dashboard.
+    if (action === 'markPosted') {
+      if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });
+      const pid = req.query.id || body.id;
+      const rows = await sql`SELECT * FROM expenses WHERE id = ${pid}`;
+      if (!rows.length) return res.status(404).json({ ok: false, error: 'Not found' });
+      const ex = rows[0];
+      if (ex.stage !== READY) return res.status(400).json({ ok: false, error: 'Not ready to post (stage=' + ex.stage + ')' });
+      const hist = Array.isArray(ex.history) ? ex.history : [];
+      hist.push({ stage: READY, action: 'posted', by: body.by || 'Accounts', at: new Date().toISOString() });
+      await sql`UPDATE expenses SET stage = 'Posted', zoho_posted = true, history = ${JSON.stringify(hist)}::jsonb, updated_at = now() WHERE id = ${ex.id}`;
+      const updated = (await sql`SELECT * FROM expenses WHERE id = ${ex.id}`)[0];
+      const em = summaryEmail(updated);
+      await postNotify({ event: 'posted', expense: updated, stage: 'Posted', to: toList(allParties(updated)), bcc: BCC_IT, email_subject: em.subject, email_html: em.html });
+      return res.json({ ok: true, expense: updated });
+    }
+
     // --- bkashJournal: the Make settlement scenario calls this to post a bKash settlement
     // journal DIRECTLY to Zoho Books (Make's own Zoho app cannot create journals — error 57).
     // Needs env: ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN (Self Client, ZohoBooks.fullaccess.all).
