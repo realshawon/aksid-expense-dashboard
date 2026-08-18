@@ -204,6 +204,9 @@ const DEPT_ALIASES={
   'finance & accounts':'Finance and Accounts','finance and accounts':'Finance and Accounts',
   'mis/it':'MIS / IT','mis / it':'MIS / IT','mis':'MIS / IT',
   'hr':'Human Resources','human resources':'Human Resources',
+  'aksid construction':'AKSID Construction','aksid construction department':'AKSID Construction',
+  'sales management':'Sales Management','sales managemet':'Sales Management',
+  'tech. engineering department':'Technical Engineering Department','technical engineering department':'Technical Engineering Department',
 };
 const canonDept=name=>{const n=String(name||'').trim();if(!n)return '—';const hit=DEPT_ALIASES[n.toLowerCase()];return hit||n;};
 const monthKey=e=>{const d=e.expense_date||e.created_at;if(!d)return '9999-99';const dt=new Date(d);return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0');};
