@@ -67,7 +67,8 @@ async function load(){
   const km=document.getElementById('keymsg');
   try{
     if(!CFG){const rc=await fetch('/api?action=config');CFG=await rc.json();}
-    const r=await fetch('/api?action=postqueue&key='+encodeURIComponent(KEY));
+    // key goes in the POST body, not the URL — a GET with ?key= would land in Vercel access logs and browser history
+    const r=await fetch('/api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'postqueue',key:KEY})});
     const d=await r.json();
     if(!d.ok){km.className='msg err';km.textContent=d.error||'Failed';return;}
     document.getElementById('keycard').style.display='none';
@@ -82,12 +83,15 @@ function depOptions(sel){
 }
 
 function lineHtml(i,acc,dep,amount){
+  // If the suggested account_id isn't in the current ledger list, the <select> would silently
+  // default to its first option with no visual sign anything changed — flag it instead.
+  const noMatch=acc&&!CFG.categories.some(c=>c.account_id===acc);
   return `<div class="line" data-exp="${i}">
     <select class="acc">${accOptions(acc)}</select>
     <select class="dep">${depOptions(dep)}</select>
     <input class="amt" type="number" step="0.01" value="${amount}">
     <button class="rm" onclick="this.parentElement.remove();recalc(${i})">✕</button>
-  </div>`;
+  </div>${noMatch?'<div style="color:#a3242e;font-size:12px;font-weight:600;margin:-2px 0 6px">⚠ Suggested ledger not found — defaulted to the first option, please check it manually.</div>':''}`;
 }
 
 function render(list){
@@ -106,7 +110,7 @@ function render(list){
         <tr><td class="k">Approved amount</td><td class="amt">${money(amt)}</td></tr>
         <tr><td class="k">Receipts</td><td>${recs}</td></tr>
       </table>
-      <div style="font-size:11px;color:#6b6b70;font-weight:700;text-transform:uppercase;letter-spacing:.05em">Post as (ledger · department tag · amount)</div>
+      <div style="font-size:11px;color:#6b6b70;font-weight:700;text-transform:uppercase;letter-spacing:.05em">Zoho Expense Account · Reporting Tag · Amount</div>
       <div class="lines" id="lines${e.id}">${lineHtml(e.id,e.suggestion.account_id,e.suggestion.tag,amt)}</div>
       <button class="addline" onclick="addLine(${e.id})">+ Split into another line</button>
       <div class="sumline" id="sum${e.id}"></div>
@@ -148,6 +152,7 @@ function recalc(id,total){
 }
 
 async function postIt(id,total){
+  if(!confirm('Post this expense to Zoho Books? This cannot be undone from here.'))return;
   const btn=document.getElementById('btn'+id);const m=document.getElementById('msg'+id);
   btn.disabled=true;m.className='msg';m.style.display='block';m.textContent='Posting to Zoho…';
   try{

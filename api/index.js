@@ -315,8 +315,8 @@ function readyToPostEmail(e) {
     + '<p style="font-size:15px;margin:0 0 2px"><b>Expense ' + esc(e.ref) + '</b> is fully approved — ready to post to Zoho Books.</p>'
     + '<p style="font-size:13px;color:#6b7280;margin:0 0 14px">Review the ledger &amp; cost-center mapping, then post it from the queue. Nothing goes to Zoho until you confirm.</p>'
     + '<table style="border-collapse:collapse;margin:0 0 14px">' + detailRows(e)
-    + row('Suggested Ledger', esc(led.account))
-    + row('Suggested Tag', esc(tag))
+    + row('Zoho Expense Account', esc(led.account))
+    + row('Zoho Reporting Tag', esc(tag))
     + receiptsCell(e) + '</table>'
     + '<p style="margin:0"><a href="' + url + '" style="display:inline-block;padding:12px 26px;background:#0e7490;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;font-family:Segoe UI,Arial,sans-serif;font-size:15px">Open Posting Queue</a></p>'
     + emailFoot();
