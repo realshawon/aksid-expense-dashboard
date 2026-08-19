@@ -135,6 +135,7 @@ async function initDb() {
   )`;
   await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS receipts JSONB DEFAULT '[]'::jsonb`;
   await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS employee_phone TEXT`;
+  await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS iou_ref TEXT`;
   await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS category_key TEXT`;      // dropdown key → LEDGERS
   await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS posting JSONB`;          // final lines posted to Zoho
   // Payment settlement (after Zoho posting): Accounts marks Paid → submitter confirms Received.
@@ -240,6 +241,7 @@ function detailRows(e, finalAmount) {
     + row('Category', esc(e.category))
     + row('Vendor', esc(e.vendor), true)
     + row('Description', esc(e.description), true)
+    + (e.iou_ref ? row('IOU Adjustment Ref', esc(e.iou_ref), true) : '')
     + row('Amount', money(amt), true);
 }
 function emailHead() {
@@ -294,6 +296,7 @@ function summaryEmail(e) {
     + row('Category', esc(e.category))
     + row('Vendor', esc(e.vendor), true)
     + row('Description', esc(e.description), true)
+    + (e.iou_ref ? row('IOU Adjustment Ref', esc(e.iou_ref), true) : '')
     + row('Amount', amtCell, true)
     + receiptsCell(e);
   const html = emailHead()
@@ -334,6 +337,7 @@ function rejectedEmail(e) {
     + row('Employee', esc(e.employee_name))
     + row('Vendor', esc(e.vendor), true)
     + row('Description', esc(e.description), true)
+    + (e.iou_ref ? row('IOU Adjustment Ref', esc(e.iou_ref), true) : '')
     + row('Amount', money(effectiveAmount(e)), true)
     + row('Rejected by', esc(last.by || '—'))
     + (last.reason ? row('Reason', esc(last.reason)) : '') + '</table>'
@@ -805,11 +809,12 @@ export default async function handler(req, res) {
         return res.status(400).json({ ok: false, error: 'manager_email is required and must be a valid email address.' });
       }
       const inserted = await sql`INSERT INTO expenses
-        (employee_name, employee_id, employee_email, employee_phone, cost_center, expense_date, category, category_key, vendor, description, amount, receipt_url, manager_email, stage, history)
+        (employee_name, employee_id, employee_email, employee_phone, cost_center, expense_date, category, category_key, vendor, description, amount, receipt_url, manager_email, stage, history, iou_ref)
         VALUES (${e.employee_name || ''}, ${e.employee_id || ''}, ${e.employee_email || ''}, ${e.employee_phone || ''}, ${e.cost_center || ''},
                 ${e.expense_date || null}, ${e.category || ''}, ${e.category_key || null}, ${e.vendor || ''}, ${e.description || ''},
                 ${e.amount || 0}, ${e.receipt_url || ''}, ${e.manager_email || ''}, 'Manager',
-                ${JSON.stringify([{ stage: 'Submitted', at: new Date().toISOString(), by: e.employee_name || '' }])}::jsonb)
+                ${JSON.stringify([{ stage: 'Submitted', at: new Date().toISOString(), by: e.employee_name || '' }])}::jsonb,
+                ${e.iou_ref || null})
         RETURNING *`;
       const row = inserted[0];
       const ref = 'EXP-' + (1000000 + Number(row.id)); // 7-digit serial, starts with 1 (no leading zeros for Excel)
@@ -934,6 +939,7 @@ export default async function handler(req, res) {
       if (body.employee_name != null) { await sql`UPDATE expenses SET employee_name = ${String(body.employee_name)} WHERE id = ${eid}`; changed.push('employee_name'); }
       if (body.employee_email != null) { await sql`UPDATE expenses SET employee_email = ${String(body.employee_email)} WHERE id = ${eid}`; changed.push('employee_email'); }
       if (body.expense_date != null) { await sql`UPDATE expenses SET expense_date = ${String(body.expense_date)} WHERE id = ${eid}`; changed.push('expense_date'); }
+      if (body.iou_ref != null) { await sql`UPDATE expenses SET iou_ref = ${String(body.iou_ref)} WHERE id = ${eid}`; changed.push('iou_ref'); }
       if (!changed.length) return res.status(400).json({ ok: false, error: 'No editable field provided' });
       await sql`UPDATE expenses SET updated_at = now() WHERE id = ${eid}`;
       const updated = (await sql`SELECT * FROM expenses WHERE id = ${eid}`)[0];

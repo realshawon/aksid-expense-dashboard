@@ -49,6 +49,7 @@ function detailRows(e){
     <tr><td class="k">Cost Center</td><td class="v">${esc(e.cost_center)||'—'}</td></tr>
     <tr><td class="k">Category</td><td class="v">${esc(e.category)||'—'}</td></tr>
     <tr><td class="k">Vendor</td><td class="v">${esc(e.vendor)||'—'}</td></tr>
+    ${e.iou_ref?`<tr><td class="k">IOU Adjustment Ref</td><td class="v">${esc(e.iou_ref)}</td></tr>`:''}
     <tr><td class="k">Amount</td><td class="v">${money(e.edited_amount!=null?e.edited_amount:e.amount)}</td></tr>`;
 }
 function payRows(e){
@@ -100,31 +101,39 @@ function render(){
     <div class="msg" id="msg"></div>
     <p class="muted">Payment settlement · Accounts records the payment, the submitter confirms receipt. <span class="save">DO NOT PRINT — SAVE PAPER.</span></p>`;
 }
+let BUSY=false;
 async function post(body){
   const m=document.getElementById('msg');m.className='msg';m.textContent='Working…';m.style.display='block';
+  const btns=document.querySelectorAll('.btns button');btns.forEach(b=>b.disabled=true);
   try{
     const r=await fetch('/api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const d=await r.json();
-    if(!d.ok){m.className='msg err';m.textContent=d.error||'Failed';return null;}
+    if(!d.ok){m.className='msg err';m.textContent=d.error||'Failed';btns.forEach(b=>b.disabled=false);BUSY=false;return null;}
     exp=d.expense;return d;
-  }catch(err){m.className='msg err';m.textContent=String(err);return null;}
+  }catch(err){m.className='msg err';m.textContent=String(err);btns.forEach(b=>b.disabled=false);BUSY=false;return null;}
 }
 async function pay(){
+  if(BUSY)return;
   const method=document.getElementById('method').value;
   const ref=document.getElementById('ref').value;
   const date=document.getElementById('pdate').value;
   if(!method){const m=document.getElementById('msg');m.className='msg err';m.textContent='Please choose a payment method.';return;}
+  BUSY=true;
   const d=await post({action:'pay',id:exp.id,method,ref,date,by:'Accounts'});
-  if(d){const m=document.getElementById('msg');m.className='msg ok';m.innerHTML='✅ Payment recorded. The submitter has been asked to confirm receipt.';setTimeout(render,1400);}
+  if(d){const m=document.getElementById('msg');m.className='msg ok';m.innerHTML='✅ Payment recorded. The submitter has been asked to confirm receipt.';setTimeout(()=>{BUSY=false;render();},1400);}else{BUSY=false;}
 }
 async function confirmReceipt(){
+  if(BUSY)return;BUSY=true;
   const d=await post({action:'confirmReceipt',id:exp.id});
-  if(d){const m=document.getElementById('msg');m.className='msg ok';m.innerHTML='✅ Thank you — receipt confirmed. This reimbursement is now closed.';setTimeout(render,1400);}
+  if(d){const m=document.getElementById('msg');m.className='msg ok';m.innerHTML='✅ Thank you — receipt confirmed. This reimbursement is now closed.';setTimeout(()=>{BUSY=false;render();},1400);}else{BUSY=false;}
 }
 async function notReceived(){
+  if(BUSY)return;
+  if(!confirm('Report this reimbursement as NOT received? This notifies Accounts to follow up.'))return;
   const note=prompt('Optional: add a note for Accounts (e.g. wrong account, amount short):')||'';
+  BUSY=true;
   const d=await post({action:'reportNotReceived',id:exp.id,note});
-  if(d){const m=document.getElementById('msg');m.className='msg err';m.innerHTML='⚠️ Reported. Accounts has been notified to follow up.';setTimeout(render,1400);}
+  if(d){const m=document.getElementById('msg');m.className='msg err';m.innerHTML='⚠️ Reported. Accounts has been notified to follow up.';setTimeout(()=>{BUSY=false;render();},1400);}else{BUSY=false;}
 }
 load();
 </script>

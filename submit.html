@@ -37,6 +37,7 @@ button{width:100%;font:inherit;font-weight:700;border:none;border-radius:10px;pa
     <label>Expense Category</label><select id="category"><option value="">Loading categories…</option></select>
     <label>Vendor Name</label><input id="vendor">
     <label>Description / Purpose</label><textarea id="description"></textarea>
+    <label>IOU Adjustment Reference Number</label><input id="iou_ref" placeholder="Optional — only if this is settling an existing IOU">
     <div class="row"><div><label>Your Email</label><input id="employee_email" type="email"></div><div><label>Concern Department Head Email (approver) *</label><input id="manager_email" type="email" required placeholder="e.g. marketing@aksidcorp.com"></div></div>
     <label>Your WhatsApp Number</label><input id="employee_phone" type="tel" placeholder="+88XXXXXXXXXX" pattern="^\+?88\d{10}$">
     <p class="muted" style="margin-top:4px">Optional: for approval updates via WhatsApp</p>
@@ -49,7 +50,7 @@ button{width:100%;font:inherit;font-weight:700;border:none;border-radius:10px;pa
   </div>
 </div>
 <script>
-const F=['employee_name','employee_id','cost_center','expense_date','amount','category','vendor','description','employee_email','manager_email','employee_phone','receipt_url'];
+const F=['employee_name','employee_id','cost_center','expense_date','amount','category','vendor','description','iou_ref','employee_email','manager_email','employee_phone','receipt_url'];
 // Dropdowns come from the backend so the lists live in exactly one place (api config)
 (async function loadConfig(){
   try{

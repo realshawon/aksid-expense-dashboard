@@ -78,6 +78,7 @@ function render(){
       <tr><td class="k">Category</td><td class="v">${exp.category||'—'}</td></tr>
       <tr><td class="k">Vendor</td><td class="v">${exp.vendor||'—'}</td></tr>
       <tr><td class="k">Description</td><td class="v">${exp.description||'—'}</td></tr>
+      ${exp.iou_ref?`<tr><td class="k">IOU Adjustment Ref</td><td class="v">${exp.iou_ref}</td></tr>`:''}
       <tr><td class="k">Amount</td><td class="v">${money(cur)}</td></tr>
       ${receiptsRow(exp)}
     </table>

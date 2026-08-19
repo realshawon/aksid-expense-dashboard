@@ -83,6 +83,7 @@ function render(list){
         <tr><td class="k">Category (submitted)</td><td>${esc(e.category)}</td></tr>
         <tr><td class="k">Vendor</td><td>${esc(e.vendor)||'—'}</td></tr>
         <tr><td class="k">Description</td><td>${esc(e.description)||'—'}</td></tr>
+        ${e.iou_ref?`<tr><td class="k">IOU Adjustment Ref</td><td>${esc(e.iou_ref)}</td></tr>`:''}
         <tr><td class="k">Approved amount</td><td class="amt">${money(amt)}</td></tr>
         <tr><td class="k">Receipts</td><td>${recs}</td></tr>
       </table>

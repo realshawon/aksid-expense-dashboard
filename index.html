@@ -191,6 +191,7 @@ async function openDetail(id){
       ${mrow('Original amount',money(e.amount))}
       ${(e.edited_amount!=null&&Number(e.edited_amount)!==Number(e.amount))?mrow('Approved amount',money(e.edited_amount)):''}
       ${mrow('Description',esc(e.description||'—'))}
+      ${e.iou_ref?mrow('IOU Adjustment Ref',esc(e.iou_ref)):''}
       ${mrow('Concern Department Head',esc(e.manager_email||'—'))}
       ${mrow('Receipts',recHtml)}
       ${mrow('Zoho Books',e.zoho_posted?'✅ Posted':'⏳ Not posted yet')}
@@ -250,7 +251,7 @@ function render(){
   const deptFilter=dsel.value;
 
   const q=(document.getElementById('searchBox').value||'').trim().toLowerCase();
-  const matchesSearch=e=>!q||[e.ref,e.employee_name,e.vendor,e.category,e.cost_center,canonDept(e.cost_center)].some(v=>String(v||'').toLowerCase().includes(q));
+  const matchesSearch=e=>!q||[e.ref,e.employee_name,e.vendor,e.category,e.cost_center,canonDept(e.cost_center),e.iou_ref].some(v=>String(v||'').toLowerCase().includes(q));
 
   const sorted=[...ex].filter(e=>(!filter||monthKey(e)===filter)&&(!deptFilter||canonDept(e.cost_center)===deptFilter)&&matchesSearch(e))
     .sort((a,b)=>monthKey(b).localeCompare(monthKey(a))||serialNum(b.ref)-serialNum(a.ref));
@@ -300,6 +301,7 @@ function exportExcel(){
       'Department':canonDept(e.cost_center),
       'Category':e.category||'—',
       'Vendor':e.vendor||'—',
+      'IOU Adjustment Ref':e.iou_ref||'',
       'Amount (BDT)':Number(e.edited_amount!=null?e.edited_amount:e.amount)||0,
       'Stage':stageLabelForExport(e.stage),
       'Currently With':WITH[e.stage]||e.stage,
