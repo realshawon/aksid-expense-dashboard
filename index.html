@@ -49,6 +49,7 @@ tr:last-child td{border-bottom:none}
 .legend span{display:inline-flex;align-items:center;gap:5px}.lg{width:10px;height:10px;border-radius:50%;display:inline-block}
 .empty{color:#9a9aa0;font-size:13px;padding:14px 4px}
 button.r{font:inherit;font-size:12px;border:1px solid #d6dae1;background:#fff;border-radius:8px;padding:5px 12px;cursor:pointer}
+button.r:disabled{opacity:.4;cursor:default}
 .reflink{color:#2a6df4;font-weight:700;text-decoration:none}
 tbody tr{cursor:pointer}tbody tr:hover{background:#f7f9fc}tbody tr:hover .reflink{text-decoration:underline}
 .ovl{position:fixed;inset:0;background:rgba(17,24,39,.45);display:none;align-items:flex-start;justify-content:center;z-index:50;padding:30px 14px;overflow:auto}
@@ -72,8 +73,8 @@ tbody tr{cursor:pointer}tbody tr:hover{background:#f7f9fc}tbody tr:hover .reflin
   <div class="topbar">
     <img class="logo" src="https://images.squarespace-cdn.com/content/v1/61b1d88771230e2244b14213/de522f80-4556-42c4-af20-e3687e746991/AKSID-HORIZONTAL-LOGO.png?format=750w" alt="AKSID Corporation Limited">
     <div class="titlebox"><h1>Expense — Live Tracker</h1><p class="sub">AKSID Corporation Limited · who submitted, who it's with, what stage · live</p></div>
-    <select id="deptFilter" class="monthsel" onchange="render()"><option value="">All departments</option></select>
-    <select id="monthFilter" class="monthsel" onchange="render()"><option value="">All months</option></select>
+    <select id="deptFilter" class="monthsel" onchange="resetPage()"><option value="">All departments</option></select>
+    <select id="monthFilter" class="monthsel" onchange="resetPage()"><option value="">All months</option></select>
   </div>
 
   <div id="banner" class="banner"><span class="dot"></span>
@@ -91,7 +92,7 @@ tbody tr{cursor:pointer}tbody tr:hover{background:#f7f9fc}tbody tr:hover .reflin
 
   <div class="panel">
     <h2>Submission &amp; approval tracker <span class="tag">Live</span>
-      <input id="searchBox" type="text" placeholder="Search ref, name, vendor, category…" oninput="render()" style="margin-left:auto;font:inherit;font-size:13px;padding:9px 12px;border:1px solid #d6dae1;border-radius:9px;min-width:240px">
+      <input id="searchBox" type="text" placeholder="Search ref, name, vendor, category…" oninput="resetPage()" style="margin-left:auto;font:inherit;font-size:13px;padding:9px 12px;border:1px solid #d6dae1;border-radius:9px;min-width:240px">
       <button class="r" onclick="exportExcel()">⬇ Export Excel</button><button class="r" onclick="load()">↻ Refresh</button></h2>
     <div id="trackWrap"><div class="empty">Loading…</div></div>
     <div class="legend">
@@ -211,9 +212,15 @@ const DEPT_ALIASES={
   'tech. engineering department':'Technical Engineering Department','technical engineering department':'Technical Engineering Department',
 };
 const canonDept=name=>{const n=String(name||'').trim();if(!n)return '—';const hit=DEPT_ALIASES[n.toLowerCase()];return hit||n;};
-const monthKey=e=>{const d=e.expense_date||e.created_at;if(!d)return '9999-99';const dt=new Date(d);return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0');};
+// Grouped/sorted by submission date (created_at), not the free-picked expense_date — a submitter
+// can backdate expense_date to any day, which would otherwise break serial order within a month group.
+const monthKey=e=>{const d=e.created_at||e.expense_date;if(!d)return '9999-99';const dt=new Date(d);return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0');};
 const monthLabel=k=>k==='9999-99'?'No date':new Date(k+'-01').toLocaleString('en-US',{month:'long',year:'numeric'});
 let ALL_EX=[];
+let monthDefaulted=false;
+let currentPage=1;
+const PAGE_SIZE=40;
+function resetPage(){currentPage=1;render();}
 function render(){
   const ex=ALL_EX;
   document.getElementById('kTotal').textContent=ex.length;
@@ -226,6 +233,13 @@ function render(){
   const keys=[...new Set(ex.map(monthKey))].sort((a,b)=>b.localeCompare(a));
   sel.innerHTML='<option value="">All months</option>'+keys.map(k=>`<option value="${k}">${monthLabel(k)}</option>`).join('');
   if(keys.includes(keep))sel.value=keep;
+  // First load only: default to the current calendar month if it has any data, so the tracker
+  // isn't dumping every submission ever made. "All months" stays a deliberate, paginated choice.
+  if(!monthDefaulted){
+    monthDefaulted=true;
+    const nowKey=new Date().getFullYear()+'-'+String(new Date().getMonth()+1).padStart(2,'0');
+    if(!keep&&keys.includes(nowKey))sel.value=nowKey;
+  }
   const filter=sel.value;
 
   const dsel=document.getElementById('deptFilter');
@@ -241,8 +255,17 @@ function render(){
   const sorted=[...ex].filter(e=>(!filter||monthKey(e)===filter)&&(!deptFilter||canonDept(e.cost_center)===deptFilter)&&matchesSearch(e))
     .sort((a,b)=>monthKey(b).localeCompare(monthKey(a))||serialNum(b.ref)-serialNum(a.ref));
   if(!sorted.length){document.getElementById('trackWrap').innerHTML='<div class="empty">No submissions'+(deptFilter?' in '+esc(deptFilter):'')+(filter?' for '+monthLabel(filter):'')+(q?' matching "'+esc(q)+'"':'')+'.</div>';return;}
+
+  // Pagination only kicks in for the unbounded "All months" view — a single specific month is
+  // already a naturally-sized page, so it always renders in full.
+  const paginated=!filter;
+  const totalPages=paginated?Math.max(1,Math.ceil(sorted.length/PAGE_SIZE)):1;
+  if(currentPage>totalPages)currentPage=totalPages;
+  if(currentPage<1)currentPage=1;
+  const pageItems=paginated?sorted.slice((currentPage-1)*PAGE_SIZE,currentPage*PAGE_SIZE):sorted;
+
   let rows='',lastKey=null;
-  for(const e of sorted){
+  for(const e of pageItems){
     const k=monthKey(e);
     if(!filter&&k!==lastKey){lastKey=k;const cnt=sorted.filter(x=>monthKey(x)===k).length;rows+=`<tr class="mhead"><td colspan="6">${monthLabel(k)}<span class="cnt">${cnt} submission${cnt>1?'s':''}</span></td></tr>`;}
     rows+=`<tr onclick="openDetail(${e.id})">
@@ -253,7 +276,12 @@ function render(){
       <td>${stepper(e.stage)}</td>
       <td>${withPill(e)}</td></tr>`;
   }
-  document.getElementById('trackWrap').innerHTML='<table><thead><tr><th>Ref</th><th>Submitter</th><th>Dept</th><th>Category</th><th>Stage</th><th>Currently with</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  const pager=paginated&&totalPages>1?`<div style="display:flex;align-items:center;justify-content:center;gap:12px;padding:14px 0;font-size:13px;color:#6b6b70">
+      <button class="r" ${currentPage<=1?'disabled':''} onclick="currentPage--;render()">← Previous</button>
+      <span>Page ${currentPage} of ${totalPages} · ${sorted.length} submissions</span>
+      <button class="r" ${currentPage>=totalPages?'disabled':''} onclick="currentPage++;render()">Next →</button>
+    </div>`:'';
+  document.getElementById('trackWrap').innerHTML='<table><thead><tr><th>Ref</th><th>Submitter</th><th>Dept</th><th>Category</th><th>Stage</th><th>Currently with</th></tr></thead><tbody>'+rows+'</tbody></table>'+pager;
 }
 function exportExcel(){
   if(!ALL_EX.length){alert('No data to export yet.');return;}
