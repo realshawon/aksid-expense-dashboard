@@ -183,8 +183,10 @@ function approverEmail(expense, stage) {
   if (stage === 'Top Management or Others') return TOPMGMT_EMAIL;
   return '';
 }
+// Top Management already got their approval-stage email; once that's done they don't need the
+// downstream "posted / record payment" summary — that's for Accounts and the submitter to act on.
 function allParties(expense) {
-  return [expense.employee_email, AUDIT_EMAIL, ACCOUNTS_EMAIL, ACCOUNTS2_EMAIL, TOPMGMT_EMAIL];
+  return [expense.employee_email, AUDIT_EMAIL, ACCOUNTS_EMAIL, ACCOUNTS2_EMAIL];
 }
 // Dedupe + drop blanks, and never put IT in the visible To (IT is BCC only)
 function toList(arr) {
