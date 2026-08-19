@@ -937,6 +937,23 @@ export default async function handler(req, res) {
       return res.json({ ok: true, changed, expense: updated });
     }
 
+    // --- fixStage: repair an expense stuck on a stage name that no longer exists in STAGES
+    // (e.g. left over from a past rename) by moving it to a valid stage (admin only) ---
+    if (action === 'fixStage') {
+      if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });
+      const fid = req.query.id || body.id;
+      const target = (req.query.stage || body.stage || '').toString();
+      if (!STAGES.includes(target) && target !== READY) return res.status(400).json({ ok: false, error: 'Bad stage: ' + target });
+      const frows = await sql`SELECT * FROM expenses WHERE id = ${fid}`;
+      if (!frows.length) return res.status(404).json({ ok: false, error: 'Not found' });
+      const fr = frows[0];
+      const fhist = Array.isArray(fr.history) ? fr.history : [];
+      fhist.push({ stage: fr.stage, action: 'stage_fixed', by: 'admin', at: new Date().toISOString(), to_stage: target });
+      await sql`UPDATE expenses SET stage = ${target}, history = ${JSON.stringify(fhist)}::jsonb, updated_at = now() WHERE id = ${fid}`;
+      const fu = (await sql`SELECT * FROM expenses WHERE id = ${fid}`)[0];
+      return res.json({ ok: true, message: 'Moved ' + fu.ref + ' from stale stage to ' + target, expense: fu });
+    }
+
     // --- unreject: recover a Rejected expense back to a chosen stage (admin only) ---
     if (action === 'unreject') {
       if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });

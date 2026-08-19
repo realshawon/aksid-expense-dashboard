@@ -236,7 +236,7 @@ function render(){
   const deptFilter=dsel.value;
 
   const q=(document.getElementById('searchBox').value||'').trim().toLowerCase();
-  const matchesSearch=e=>!q||[e.ref,e.employee_name,e.vendor,e.category,e.cost_center].some(v=>String(v||'').toLowerCase().includes(q));
+  const matchesSearch=e=>!q||[e.ref,e.employee_name,e.vendor,e.category,e.cost_center,canonDept(e.cost_center)].some(v=>String(v||'').toLowerCase().includes(q));
 
   const sorted=[...ex].filter(e=>(!filter||monthKey(e)===filter)&&(!deptFilter||canonDept(e.cost_center)===deptFilter)&&matchesSearch(e))
     .sort((a,b)=>monthKey(b).localeCompare(monthKey(a))||serialNum(b.ref)-serialNum(a.ref));
@@ -259,7 +259,7 @@ function exportExcel(){
   if(!ALL_EX.length){alert('No data to export yet.');return;}
   const dsel=document.getElementById('deptFilter'),msel=document.getElementById('monthFilter');
   const deptFilter=dsel?dsel.value:'',monthFilter=msel?msel.value:'';
-  const filtered=ALL_EX.filter(e=>(!monthFilter||monthKey(e)===monthFilter)&&(!deptFilter||(e.cost_center||'—')===deptFilter));
+  const filtered=ALL_EX.filter(e=>(!monthFilter||monthKey(e)===monthFilter)&&(!deptFilter||canonDept(e.cost_center)===deptFilter));
   if(!filtered.length){alert('No data to export for the current filter.');return;}
   const byMonth={};
   for(const e of filtered){const k=monthKey(e);(byMonth[k]=byMonth[k]||[]).push(e);}
@@ -269,7 +269,7 @@ function exportExcel(){
     const rows=byMonth[k].sort((a,b)=>serialNum(b.ref)-serialNum(a.ref)).map(e=>({
       'Ref':e.ref||('#'+e.id),
       'Submitter':e.employee_name||'—',
-      'Department':e.cost_center||'—',
+      'Department':canonDept(e.cost_center),
       'Category':e.category||'—',
       'Vendor':e.vendor||'—',
       'Amount (BDT)':Number(e.edited_amount!=null?e.edited_amount:e.amount)||0,
