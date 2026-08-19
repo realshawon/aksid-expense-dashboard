@@ -933,6 +933,7 @@ export default async function handler(req, res) {
       if (body.description != null) { await sql`UPDATE expenses SET description = ${String(body.description)} WHERE id = ${eid}`; changed.push('description'); }
       if (body.employee_name != null) { await sql`UPDATE expenses SET employee_name = ${String(body.employee_name)} WHERE id = ${eid}`; changed.push('employee_name'); }
       if (body.employee_email != null) { await sql`UPDATE expenses SET employee_email = ${String(body.employee_email)} WHERE id = ${eid}`; changed.push('employee_email'); }
+      if (body.expense_date != null) { await sql`UPDATE expenses SET expense_date = ${String(body.expense_date)} WHERE id = ${eid}`; changed.push('expense_date'); }
       if (!changed.length) return res.status(400).json({ ok: false, error: 'No editable field provided' });
       await sql`UPDATE expenses SET updated_at = now() WHERE id = ${eid}`;
       const updated = (await sql`SELECT * FROM expenses WHERE id = ${eid}`)[0];
