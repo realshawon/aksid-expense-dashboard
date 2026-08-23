@@ -56,6 +56,8 @@ const DEPARTMENTS = [
   { label: 'Project Sales',          tag: 'Head Office' },
   { label: 'Crossgate',              tag: 'Head Office' },
   { label: 'Ortrio',                 tag: 'Head Office' },
+  { label: 'Safe Daycare',           tag: 'Head Office' },
+  { label: 'Management Research',    tag: 'Management' },
 ];
 
 function resolveLedger(e) {
