@@ -73,6 +73,7 @@ tbody tr{cursor:pointer}tbody tr:hover{background:#f7f9fc}tbody tr:hover .reflin
   <div class="topbar">
     <img class="logo" src="https://images.squarespace-cdn.com/content/v1/61b1d88771230e2244b14213/de522f80-4556-42c4-af20-e3687e746991/AKSID-HORIZONTAL-LOGO.png?format=750w" alt="AKSID Corporation Limited">
     <div class="titlebox"><h1>Expense — Live Tracker</h1><p class="sub">AKSID Corporation Limited · who submitted, who it's with, what stage · live</p></div>
+    <select id="withFilter" class="monthsel" onchange="resetPage()"><option value="">Currently with — all</option></select>
     <select id="deptFilter" class="monthsel" onchange="resetPage()"><option value="">All departments</option></select>
     <select id="monthFilter" class="monthsel" onchange="resetPage()"><option value="">All months</option></select>
   </div>
@@ -129,6 +130,17 @@ function stepper(stage){
     h+=`<span class="stp ${cls}"></span>`+(i<ORDER.length-1?`<span class="stpl ${i<cur?'done':''}"></span>`:'');
   }
   return h+'</div>';
+}
+function currentlyWithText(e){
+  const stage=e.stage;const ss=e.settlement_status;
+  if(stage==='Posted'){
+    if(ss==='closed')return 'Received · closed';
+    if(ss==='paid')return 'Paid · awaiting receipt';
+    if(ss==='issue')return 'Not received';
+    return WITH.Posted;
+  }
+  if(stage==='Rejected')return 'Rejected';
+  return WITH[stage]||stage;
 }
 function withPill(e){
   const stage=(typeof e==='string')?e:e.stage;
@@ -250,12 +262,19 @@ function render(){
   if(depts.includes(deptKeep))dsel.value=deptKeep;
   const deptFilter=dsel.value;
 
+  const wsel=document.getElementById('withFilter');
+  const withKeep=wsel.value;
+  const withs=[...new Set(ex.map(currentlyWithText))].sort((a,b)=>a.localeCompare(b));
+  wsel.innerHTML='<option value="">Currently with — all</option>'+withs.map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join('');
+  if(withs.includes(withKeep))wsel.value=withKeep;
+  const withFilter=wsel.value;
+
   const q=(document.getElementById('searchBox').value||'').trim().toLowerCase();
   const matchesSearch=e=>!q||[e.ref,e.employee_name,e.vendor,e.category,e.cost_center,canonDept(e.cost_center),e.iou_ref].some(v=>String(v||'').toLowerCase().includes(q));
 
-  const sorted=[...ex].filter(e=>(!filter||monthKey(e)===filter)&&(!deptFilter||canonDept(e.cost_center)===deptFilter)&&matchesSearch(e))
+  const sorted=[...ex].filter(e=>(!filter||monthKey(e)===filter)&&(!deptFilter||canonDept(e.cost_center)===deptFilter)&&(!withFilter||currentlyWithText(e)===withFilter)&&matchesSearch(e))
     .sort((a,b)=>monthKey(b).localeCompare(monthKey(a))||serialNum(b.ref)-serialNum(a.ref));
-  if(!sorted.length){document.getElementById('trackWrap').innerHTML='<div class="empty">No submissions'+(deptFilter?' in '+esc(deptFilter):'')+(filter?' for '+monthLabel(filter):'')+(q?' matching "'+esc(q)+'"':'')+'.</div>';return;}
+  if(!sorted.length){document.getElementById('trackWrap').innerHTML='<div class="empty">No submissions'+(deptFilter?' in '+esc(deptFilter):'')+(withFilter?' currently with '+esc(withFilter):'')+(filter?' for '+monthLabel(filter):'')+(q?' matching "'+esc(q)+'"':'')+'.</div>';return;}
 
   // Pagination only kicks in for the unbounded "All months" view — a single specific month is
   // already a naturally-sized page, so it always renders in full.
@@ -286,9 +305,9 @@ function render(){
 }
 function exportExcel(){
   if(!ALL_EX.length){alert('No data to export yet.');return;}
-  const dsel=document.getElementById('deptFilter'),msel=document.getElementById('monthFilter');
-  const deptFilter=dsel?dsel.value:'',monthFilter=msel?msel.value:'';
-  const filtered=ALL_EX.filter(e=>(!monthFilter||monthKey(e)===monthFilter)&&(!deptFilter||canonDept(e.cost_center)===deptFilter));
+  const dsel=document.getElementById('deptFilter'),msel=document.getElementById('monthFilter'),wsel=document.getElementById('withFilter');
+  const deptFilter=dsel?dsel.value:'',monthFilter=msel?msel.value:'',withFilter=wsel?wsel.value:'';
+  const filtered=ALL_EX.filter(e=>(!monthFilter||monthKey(e)===monthFilter)&&(!deptFilter||canonDept(e.cost_center)===deptFilter)&&(!withFilter||currentlyWithText(e)===withFilter));
   if(!filtered.length){alert('No data to export for the current filter.');return;}
   const byMonth={};
   for(const e of filtered){const k=monthKey(e);(byMonth[k]=byMonth[k]||[]).push(e);}
