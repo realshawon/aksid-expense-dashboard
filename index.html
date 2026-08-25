@@ -84,10 +84,10 @@ tbody tr{cursor:pointer}tbody tr:hover{background:#f7f9fc}tbody tr:hover .reflin
   </div>
 
   <div class="cards">
-    <div class="card"><div class="lbl" id="kOpenLbl">In approval now</div><div class="val" id="kOpen">—</div><div class="note" id="kOpenNote">awaiting an approver</div></div>
+    <div class="card"><div class="lbl">In approval now</div><div class="val" id="kOpen">—</div><div class="note">awaiting an approver</div></div>
     <div class="card"><div class="lbl">Posted to Zoho</div><div class="val" id="kPosted">—</div><div class="note">fully approved &amp; recorded</div></div>
     <div class="card"><div class="lbl">Rejected</div><div class="val" id="kRej">—</div><div class="note">sent back</div></div>
-    <div class="card"><div class="lbl">Total submissions</div><div class="val" id="kTotal">—</div><div class="note" id="kTotalNote">in the system</div></div>
+    <div class="card"><div class="lbl">Total submissions</div><div class="val" id="kTotal">—</div><div class="note">in the system</div></div>
     <a href="submit.html" style="text-decoration:none;display:flex;align-items:center;justify-content:center;background:#2a6df4;color:#fff;border-radius:12px;padding:14px 16px;font-weight:700;font-size:14px">+ New Submission</a>
   </div>
 
@@ -236,9 +236,11 @@ const PAGE_SIZE=40;
 function resetPage(){currentPage=1;render();}
 function render(){
   const ex=ALL_EX;
-  if(!ex.length){
-    ['kOpen','kPosted','kRej','kTotal'].forEach(id=>document.getElementById(id).textContent='0');
-    document.getElementById('trackWrap').innerHTML='<div class="empty">No submissions yet. New expenses will appear here automatically.</div>';return;}
+  document.getElementById('kTotal').textContent=ex.length;
+  document.getElementById('kOpen').textContent=ex.filter(e=>['Manager','Audit','Accounts','Top Management or Others','Ready to Post'].includes(e.stage)).length;
+  document.getElementById('kPosted').textContent=ex.filter(e=>e.stage==='Posted').length;
+  document.getElementById('kRej').textContent=ex.filter(e=>e.stage==='Rejected').length;
+  if(!ex.length){document.getElementById('trackWrap').innerHTML='<div class="empty">No submissions yet. New expenses will appear here automatically.</div>';return;}
   const sel=document.getElementById('monthFilter');
   const keep=sel.value;
   const keys=[...new Set(ex.map(monthKey))].sort((a,b)=>b.localeCompare(a));
@@ -272,21 +274,6 @@ function render(){
 
   const sorted=[...ex].filter(e=>(!filter||monthKey(e)===filter)&&(!deptFilter||canonDept(e.cost_center)===deptFilter)&&(!withFilter||currentlyWithText(e)===withFilter)&&matchesSearch(e))
     .sort((a,b)=>monthKey(b).localeCompare(monthKey(a))||serialNum(b.ref)-serialNum(a.ref));
-
-  // The cards count the same rows the table is showing, so a desk that filters to its own name
-  // reads its own queue instead of the company-wide totals. Set before the empty-result return
-  // below so a filter that matches nothing still zeroes them out.
-  const IN_APPROVAL=['Manager','Audit','Accounts','Top Management or Others','Ready to Post'];
-  const DESKS=new Set(IN_APPROVAL.map(s=>WITH[s]||s));
-  document.getElementById('kOpen').textContent=sorted.filter(e=>IN_APPROVAL.includes(e.stage)).length;
-  document.getElementById('kPosted').textContent=sorted.filter(e=>e.stage==='Posted').length;
-  document.getElementById('kRej').textContent=sorted.filter(e=>e.stage==='Rejected').length;
-  document.getElementById('kTotal').textContent=sorted.length;
-  const onDesk=withFilter&&DESKS.has(withFilter);
-  document.getElementById('kOpenLbl').textContent=onDesk?('Pending with '+withFilter):'In approval now';
-  document.getElementById('kOpenNote').textContent=onDesk?'waiting on this desk':'awaiting an approver';
-  document.getElementById('kTotalNote').textContent=(filter||deptFilter||withFilter||q)?'matching current filters':'in the system';
-
   if(!sorted.length){document.getElementById('trackWrap').innerHTML='<div class="empty">No submissions'+(deptFilter?' in '+esc(deptFilter):'')+(withFilter?' currently with '+esc(withFilter):'')+(filter?' for '+monthLabel(filter):'')+(q?' matching "'+esc(q)+'"':'')+'.</div>';return;}
 
   // Pagination only kicks in for the unbounded "All months" view — a single specific month is

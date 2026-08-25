@@ -1,8 +1,6 @@
 // AKSID Expense backend — single serverless function (Vercel + Neon Postgres)
 // Routes by ?action= (or JSON body.action): init | list | get | submit | approve | reject
 import { neon } from '@neondatabase/serverless';
-import { getSession, requestMeta } from './_auth.js';
-import { canActOnStage, isAdmin, canViewAll } from './_authz.js';
 
 const sql = neon(process.env.DATABASE_URL);
 
@@ -87,62 +85,22 @@ function resolveDeptTag(costCenter) {
   return 'Head Office';
 }
 
-// Admin gate. An authenticated ERP admin/superadmin session is the primary path.
-// ADMIN_KEY is kept only so existing operational tooling keeps working, and it now
-// FAILS CLOSED: with no ADMIN_KEY set there is no usable key at all. The previous
-// hardcoded fallback ('aksid-admin-2026') was published in this source file and is
-// deliberately gone — anything relying on it must now sign in instead.
+// Consolidated admin-key check. Warns (once per cold start) if ADMIN_KEY isn't set in the
+// environment, since the hardcoded fallback is public (it's in this source file) and anyone
+// who has seen the repo could use it — set ADMIN_KEY in Vercel env vars for real protection.
+let warnedDefaultKey = false;
 function checkAdminKey(req, body) {
-  const configured = process.env.ADMIN_KEY;
-  if (!configured) return false;
-  const supplied = req.query.key || body.key;
-  if (typeof supplied !== 'string' || supplied.length !== configured.length) return false;
-  // Constant-time compare so the key can't be recovered a character at a time.
-  let diff = 0;
-  for (let i = 0; i < configured.length; i++) diff |= configured.charCodeAt(i) ^ supplied.charCodeAt(i);
-  return diff === 0;
-}
-
-/** Admin actions accept EITHER an ERP admin session OR a valid ADMIN_KEY. */
-function isAdminRequest(session, req, body) {
-  return isAdmin(session) || checkAdminKey(req, body);
-}
-
-// Same-origin only. This used to be '*', which let any website on the internet
-// POST an approval to this API on a logged-in user's behalf.
-const ALLOWED_ORIGINS = [
-  process.env.APP_BASE_URL || 'https://expense.aksidcorp.com',
-  'http://localhost:4173',
-];
-function cors(res, req) {
-  const origin = req?.headers?.origin;
-  if (origin && ALLOWED_ORIGINS.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  if (!process.env.ADMIN_KEY && !warnedDefaultKey) {
+    warnedDefaultKey = true;
+    console.error('SECURITY: ADMIN_KEY env var is not set — falling back to the hardcoded default key. Set ADMIN_KEY in Vercel env vars.');
   }
-  res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+  return (req.query.key || body.key) === (process.env.ADMIN_KEY || 'aksid-admin-2026');
+}
+
+function cors(res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-}
-
-/**
- * Record one approval action against the verified ERP identity.
- * Never takes a name from the request. Deliberately non-fatal: if the audit
- * insert fails we log loudly but do not roll back a completed approval, because
- * losing the user's action is worse than a gap in the trail — the gap is visible.
- */
-async function writeAudit(req, session, { expense, action, fromStage, toStage, amount, notes, override }) {
-  try {
-    const { ip, userAgent } = requestMeta(req);
-    await sql`INSERT INTO approval_audit
-      (expense_id, expense_ref, actor_user_id, actor_email, actor_name, actor_role,
-       action, from_stage, to_stage, amount, notes, was_override, ip, user_agent)
-      VALUES (${expense.id}, ${expense.ref || null}, ${session.userId}, ${session.email},
-              ${session.name}, ${session.role}, ${action}, ${fromStage || null}, ${toStage || null},
-              ${amount != null ? Number(amount) : null}, ${notes || null}, ${!!override}, ${ip}, ${userAgent})`;
-  } catch (err) {
-    console.error('AUDIT WRITE FAILED', { ref: expense?.ref, action, actor: session?.email, err: err.message });
-  }
 }
 
 async function initDb() {
@@ -177,29 +135,6 @@ async function initDb() {
     data TEXT,
     created_at TIMESTAMPTZ DEFAULT now()
   )`;
-  // Append-only approval audit trail (2026-08-24). Separate from expenses.history,
-  // which stays exactly as it is so every existing trail keeps rendering. The
-  // difference is that every row here carries a VERIFIED ERP identity rather than
-  // a name typed into a form or read off a URL.
-  await sql`CREATE TABLE IF NOT EXISTS approval_audit (
-    id BIGSERIAL PRIMARY KEY,
-    expense_id INT NOT NULL,
-    expense_ref TEXT,
-    actor_user_id BIGINT,
-    actor_email TEXT,
-    actor_name TEXT,
-    actor_role TEXT,
-    action TEXT NOT NULL,
-    from_stage TEXT,
-    to_stage TEXT,
-    amount NUMERIC,
-    notes TEXT,
-    was_override BOOLEAN DEFAULT false,
-    ip TEXT,
-    user_agent TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-  )`;
-  await sql`CREATE INDEX IF NOT EXISTS approval_audit_expense_idx ON approval_audit (expense_id, created_at DESC)`;
   await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS receipts JSONB DEFAULT '[]'::jsonb`;
   await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS employee_phone TEXT`;
   await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS iou_ref TEXT`;
@@ -278,15 +213,11 @@ function zohoNotes(e) {
   return parts.filter(x => x && String(x).trim()).join(' · ').slice(0, 100);
 }
 
-// The link identifies the request and nothing else. It used to carry
-// &role=<stage>, which the server then trusted as the approver's identity —
-// forwarding the email handed over approval rights. Authority now comes solely
-// from the signed-in ERP session, so no role travels in the URL.
-function approveUrlRaw(expense) {
-  return APP_BASE + '/approve.html?id=' + expense.id;
+function approveUrlRaw(expense, stage) {
+  return APP_BASE + '/approve.html?id=' + expense.id + '&role=' + encodeURIComponent(stage || '');
 }
-function approveButton(expense) {
-  const url = approveUrlRaw(expense);
+function approveButton(expense, stage) {
+  const url = approveUrlRaw(expense, stage);
   return '<a href="' + url + '" style="display:inline-block;padding:12px 26px;background:#2a6df4;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;font-family:Segoe UI,Arial,sans-serif;font-size:15px">Review &amp; Approve</a>';
 }
 function receiptLink(url) {
@@ -349,7 +280,7 @@ function stepEmail(e, stage) {
     + '<table style="border-collapse:collapse;margin:0 0 16px">' + detailRows(e)
     + receiptsCell(e) + '</table>'
     + (hasTrail ? sectionLabel('Approved so far') + approvalTrail(e) + '<div style="height:14px"></div>' : '')
-    + '<p style="margin:0">' + approveButton(e) + '</p>'
+    + '<p style="margin:0">' + approveButton(e, stage) + '</p>'
     + emailFoot();
   return { subject: 'AKSID Expense ' + e.ref + ' — ' + stageLabel(stage), html };
 }
@@ -549,7 +480,7 @@ async function fileReceipt(row, b64, origName, contentType) {
 }
 
 export default async function handler(req, res) {
-  cors(res, req);
+  cors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
@@ -562,18 +493,6 @@ export default async function handler(req, res) {
 
     // Self-heal: guarantee the schema exists before we touch it (cheap, idempotent, cached per instance).
     await ensureSchema();
-
-    // Identity for the whole request. Resolved once, verified against the ERP.
-    // Nothing below may take an actor from the request body or a URL parameter.
-    const session = await getSession(req);
-
-    // Actions that stay reachable without a session: the public health probe and
-    // the submit form (employees submit their own expenses without an ERP login,
-    // exactly as they do today). Everything else requires authentication.
-    const PUBLIC_ACTIONS = new Set(['health', 'config', 'submit', 'init']);
-    if (!PUBLIC_ACTIONS.has(action) && !session) {
-      return res.status(401).json({ ok: false, error: 'Not signed in.', login: '/login.html' });
-    }
 
     // --- init: create the table (run once) ---
     if (action === 'init') {
@@ -612,15 +531,8 @@ export default async function handler(req, res) {
 
     // --- list: all expenses (for the dashboard) ---
     if (action === 'list') {
-      // Was public — it returned every employee's name, email, phone and amounts
-      // to anyone who hit the URL. Approver roles still see everything (that is
-      // the point of the dashboard); everyone else sees only their own.
-      const rows = canViewAll(session)
-        ? await sql`SELECT * FROM expenses ORDER BY created_at DESC LIMIT 200`
-        : await sql`SELECT * FROM expenses
-                     WHERE lower(employee_email) = ${session.email}
-                     ORDER BY created_at DESC LIMIT 200`;
-      return res.json({ ok: true, stages: STAGES, expenses: rows, viewer: { email: session.email, role: session.role, canViewAll: canViewAll(session) } });
+      const rows = await sql`SELECT * FROM expenses ORDER BY created_at DESC LIMIT 200`;
+      return res.json({ ok: true, stages: STAGES, expenses: rows });
     }
 
     // --- get: a single expense (for the approval page) ---
@@ -628,27 +540,12 @@ export default async function handler(req, res) {
       const id = req.query.id || body.id;
       const rows = await sql`SELECT * FROM expenses WHERE id = ${id}`;
       if (!rows.length) return res.status(404).json({ ok: false, error: 'Not found' });
-      const exp = rows[0];
-      const mine = String(exp.employee_email || '').toLowerCase() === session.email;
-      if (!canViewAll(session) && !mine) {
-        return res.status(403).json({ ok: false, error: 'You do not have access to this expense.' });
-      }
-      // Tell the page whether THIS user may act right now, so the UI can show the
-      // real reason instead of offering a button that will be refused.
-      const verdict = canActOnStage(session, exp);
-      const audit = await sql`SELECT actor_name, actor_email, actor_role, action, from_stage, to_stage, amount, notes, created_at
-                                FROM approval_audit WHERE expense_id = ${id} ORDER BY created_at ASC`;
-      return res.json({
-        ok: true, expense: exp, stages: STAGES, audit,
-        can_act: verdict.ok === true,
-        can_act_reason: verdict.ok ? null : verdict.error,
-        viewer: { name: session.name, email: session.email, role: session.role },
-      });
+      return res.json({ ok: true, expense: rows[0], stages: STAGES });
     }
 
     // --- resend: re-send the current-stage approver email (fresh, correct link) ---
     if (action === 'resend') {
-      if (!isAdminRequest(session, req, body)) return res.status(403).json({ ok: false, error: 'Forbidden — an ERP admin session or a valid admin key is required.' });
+      if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });
       const rid = req.query.id || body.id;
       const rrows = await sql`SELECT * FROM expenses WHERE id = ${rid}`;
       if (!rrows.length) return res.status(404).json({ ok: false, error: 'Not found' });
@@ -670,7 +567,7 @@ export default async function handler(req, res) {
 
     // --- postqueue: fully-approved expenses awaiting Zoho posting, with suggested mapping (admin) ---
     if (action === 'postqueue') {
-      if (!isAdminRequest(session, req, body)) return res.status(403).json({ ok: false, error: 'Forbidden — an ERP admin session or a valid admin key is required.' });
+      if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });
       const rows = await sql`SELECT * FROM expenses WHERE stage = ${READY} ORDER BY updated_at ASC`;
       const out = rows.map(r => {
         const led = resolveLedger(r);
@@ -681,7 +578,7 @@ export default async function handler(req, res) {
 
     // --- postToZoho: Accounts confirms the mapping (and optional cost-center split) → write to Zoho ---
     if (action === 'postToZoho') {
-      if (!isAdminRequest(session, req, body)) return res.status(403).json({ ok: false, error: 'Forbidden — an ERP admin session or a valid admin key is required.' });
+      if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });
       const pid = req.query.id || body.id;
       const rows = await sql`SELECT * FROM expenses WHERE id = ${pid}`;
       if (!rows.length) return res.status(404).json({ ok: false, error: 'Not found' });
@@ -732,7 +629,7 @@ export default async function handler(req, res) {
       if (!posted) posted = await postWebhook(process.env.MAKE_ZOHO_WEBHOOK, payload);
       if (!posted) return res.status(502).json({ ok: false, error: 'Zoho webhook did not accept the posting — expense left in the queue.' });
       const hist = Array.isArray(ex.history) ? ex.history : [];
-      hist.push({ stage: READY, action: 'posted', by: (session && (session.name || session.email)) || 'Accounts', at: new Date().toISOString(), lines });
+      hist.push({ stage: READY, action: 'posted', by: body.by || 'Accounts', at: new Date().toISOString(), lines });
       await sql`UPDATE expenses SET stage = 'Posted', zoho_posted = true, posting = ${JSON.stringify(lines)}::jsonb, history = ${JSON.stringify(hist)}::jsonb, updated_at = now() WHERE id = ${ex.id}`;
       const updated = (await sql`SELECT * FROM expenses WHERE id = ${ex.id}`)[0];
       const em = summaryEmail(updated);
@@ -743,14 +640,14 @@ export default async function handler(req, res) {
     // --- markPosted: Accounts posts the expense in Zoho Books themselves (outside this app),
     // then just confirms it here — no automatic Zoho API call, just updates our own record/dashboard.
     if (action === 'markPosted') {
-      if (!isAdminRequest(session, req, body)) return res.status(403).json({ ok: false, error: 'Forbidden — an ERP admin session or a valid admin key is required.' });
+      if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });
       const pid = req.query.id || body.id;
       const rows = await sql`SELECT * FROM expenses WHERE id = ${pid}`;
       if (!rows.length) return res.status(404).json({ ok: false, error: 'Not found' });
       const ex = rows[0];
       if (ex.stage !== READY) return res.status(400).json({ ok: false, error: 'Not ready to post (stage=' + ex.stage + ')' });
       const hist = Array.isArray(ex.history) ? ex.history : [];
-      hist.push({ stage: READY, action: 'posted', by: (session && (session.name || session.email)) || 'Accounts', at: new Date().toISOString() });
+      hist.push({ stage: READY, action: 'posted', by: body.by || 'Accounts', at: new Date().toISOString() });
       await sql`UPDATE expenses SET stage = 'Posted', zoho_posted = true, history = ${JSON.stringify(hist)}::jsonb, updated_at = now() WHERE id = ${ex.id}`;
       const updated = (await sql`SELECT * FROM expenses WHERE id = ${ex.id}`)[0];
       const em = summaryEmail(updated);
@@ -763,7 +660,7 @@ export default async function handler(req, res) {
     // Needs env: ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN (Self Client, ZohoBooks.fullaccess.all).
     // Body: { key, org: 'aksid'|'crossgate', date: 'YYYY-MM-DD', total, fee, net }
     if (action === 'bkashJournal') {
-      if (!isAdminRequest(session, req, body)) return res.status(403).json({ ok: false, error: 'Forbidden — an ERP admin session or a valid admin key is required.' });
+      if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });
       const ORGS = {
         aksid:     { org_id: '898189923', wallet: '7058826000000567272', bank: '7058826000000567208', charge: '7058826000000462027',
                      tags: [{ tag_id: '7058826000000000333', tag_option_id: '7058826000000792428' }] },
@@ -822,7 +719,7 @@ export default async function handler(req, res) {
 
     // --- addAttachment: attach a file to an EXISTING expense (viewable by current + all later approvers) ---
     if (action === 'addAttachment') {
-      if (!isAdminRequest(session, req, body)) return res.status(403).json({ ok: false, error: 'Forbidden — an ERP admin session or a valid admin key is required.' });
+      if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });
       const tid = req.query.id || body.id;
       const trows = await sql`SELECT * FROM expenses WHERE id = ${tid}`;
       if (!trows.length) return res.status(404).json({ ok: false, error: 'Not found' });
@@ -848,23 +745,14 @@ export default async function handler(req, res) {
       const prows = await sql`SELECT * FROM expenses WHERE id = ${pid}`;
       if (!prows.length) return res.status(404).json({ ok: false, error: 'Not found' });
       const ex = prows[0];
-      // Recording a payment moves real money in the ledger — Accounts (or an
-      // admin) only. This previously required nothing at all.
-      if (!(isAdmin(session) || session.role === 'accounts')) {
-        return res.status(403).json({ ok: false, error: 'Only Accounts can record a payment.' });
-      }
       if (ex.stage !== 'Posted') return res.status(400).json({ ok: false, error: 'Not payable yet — must be fully approved & posted. Current: ' + ex.stage });
       if (ex.settlement_status === 'paid' || ex.settlement_status === 'closed') return res.status(409).json({ ok: false, error: 'Already ' + ex.settlement_status });
       const method = (body.method || '').toString().trim();
       const pref = (body.ref || '').toString().trim();
       const pdate = ((body.date || '').toString().trim()) || new Date().toISOString().slice(0, 10);
       if (!method) return res.status(400).json({ ok: false, error: 'Payment method is required' });
-      const paid = await sql`UPDATE expenses SET settlement_status = 'paid', payment_method = ${method}, payment_ref = ${pref}, payment_date = ${pdate}, paid_by = ${session.name || session.email}, paid_at = now(), issue_note = NULL, issue_at = NULL, updated_at = now()
-        WHERE id = ${pid} AND settlement_status IS DISTINCT FROM 'paid' AND settlement_status IS DISTINCT FROM 'closed'
-        RETURNING id`;
-      if (!paid.length) return res.status(409).json({ ok: false, error: 'This payment was just recorded by someone else.' });
+      await sql`UPDATE expenses SET settlement_status = 'paid', payment_method = ${method}, payment_ref = ${pref}, payment_date = ${pdate}, paid_by = ${(body.by || 'Accounts')}, paid_at = now(), issue_note = NULL, issue_at = NULL, updated_at = now() WHERE id = ${pid}`;
       const updated = (await sql`SELECT * FROM expenses WHERE id = ${pid}`)[0];
-      await writeAudit(req, session, { expense: updated, action: 'pay', fromStage: 'Posted', toStage: 'Posted', amount: Number(updated.edited_amount ?? updated.amount), notes: method + (pref ? ' · ' + pref : '') });
       if (updated.employee_email) {
         const pe = paidEmail(updated);
         await postNotify({ event: 'paid', expense: updated, to: toList([updated.employee_email]), bcc: BCC_IT, email_subject: pe.subject, email_html: pe.html });
@@ -878,16 +766,10 @@ export default async function handler(req, res) {
       const crows = await sql`SELECT * FROM expenses WHERE id = ${cid}`;
       if (!crows.length) return res.status(404).json({ ok: false, error: 'Not found' });
       const ex = crows[0];
-      // Only the person the money was paid to may confirm receipt (or an admin).
-      const isOwner = String(ex.employee_email || '').toLowerCase() === session.email;
-      if (!isOwner && !isAdmin(session)) {
-        return res.status(403).json({ ok: false, error: 'Only the submitter can confirm they received the payment.' });
-      }
       if (ex.settlement_status === 'closed') return res.json({ ok: true, expense: ex }); // idempotent
       if (ex.settlement_status !== 'paid' && ex.settlement_status !== 'issue') return res.status(400).json({ ok: false, error: 'Not marked paid yet.' });
       await sql`UPDATE expenses SET settlement_status = 'closed', received_at = now(), issue_note = NULL, issue_at = NULL, updated_at = now() WHERE id = ${cid}`;
       const updated = (await sql`SELECT * FROM expenses WHERE id = ${cid}`)[0];
-      await writeAudit(req, session, { expense: updated, action: 'confirm_receipt', fromStage: 'Posted', toStage: 'Posted', amount: Number(updated.edited_amount ?? updated.amount), notes: 'receipt confirmed' });
       const ce = closedEmail(updated);
       await postNotify({ event: 'closed', expense: updated, to: toList([ACCOUNTS_EMAIL, ACCOUNTS2_EMAIL]), bcc: BCC_IT, email_subject: ce.subject, email_html: ce.html });
       return res.json({ ok: true, expense: updated });
@@ -899,15 +781,10 @@ export default async function handler(req, res) {
       const nrows = await sql`SELECT * FROM expenses WHERE id = ${nid}`;
       if (!nrows.length) return res.status(404).json({ ok: false, error: 'Not found' });
       const ex = nrows[0];
-      const isOwnerN = String(ex.employee_email || '').toLowerCase() === session.email;
-      if (!isOwnerN && !isAdmin(session)) {
-        return res.status(403).json({ ok: false, error: 'Only the submitter can report a payment as not received.' });
-      }
       if (ex.settlement_status !== 'paid' && ex.settlement_status !== 'issue') return res.status(400).json({ ok: false, error: 'Not marked paid yet.' });
       const note = (body.note || '').toString().trim().slice(0, 500);
       await sql`UPDATE expenses SET settlement_status = 'issue', issue_note = ${note}, issue_at = now(), updated_at = now() WHERE id = ${nid}`;
       const updated = (await sql`SELECT * FROM expenses WHERE id = ${nid}`)[0];
-      await writeAudit(req, session, { expense: updated, action: 'report_not_received', fromStage: 'Posted', toStage: 'Posted', amount: Number(updated.edited_amount ?? updated.amount), notes: note || 'not received' });
       const ne = notReceivedEmail(updated);
       await postNotify({ event: 'not_received', expense: updated, to: toList([ACCOUNTS_EMAIL, ACCOUNTS2_EMAIL]), bcc: BCC_IT, email_subject: ne.subject, email_html: ne.html });
       return res.json({ ok: true, expense: updated });
@@ -916,16 +793,8 @@ export default async function handler(req, res) {
     // --- receipt: serve an uploaded attachment by id (so approvers can view it) ---
     if (action === 'receipt') {
       const aid = req.query.aid || body.aid;
-      // Attachment ids are sequential, so this used to let anyone walk every
-      // receipt in the system. Bind the attachment to its expense and check access.
-      const rows = await sql`SELECT a.name, a.content_type, a.data, e.employee_email
-                               FROM attachments a
-                               LEFT JOIN expenses e ON e.id = a.expense_id
-                              WHERE a.id = ${aid}`;
+      const rows = await sql`SELECT name, content_type, data FROM attachments WHERE id = ${aid}`;
       if (!rows.length) return res.status(404).json({ ok: false, error: 'Not found' });
-      if (!canViewAll(session) && String(rows[0].employee_email || '').toLowerCase() !== session.email) {
-        return res.status(403).json({ ok: false, error: 'You do not have access to this receipt.' });
-      }
       const a = rows[0];
       const buf = Buffer.from(a.data || '', 'base64');
       res.setHeader('Content-Type', a.content_type || 'application/octet-stream');
@@ -988,19 +857,17 @@ export default async function handler(req, res) {
     // --- approve: advance the stage; on final approval, post to Zoho via Make ---
     if (action === 'approve') {
       const id = body.id || req.query.id;
+      const by = body.by || body.approver || 'approver';
       const rows = await sql`SELECT * FROM expenses WHERE id = ${id}`;
       if (!rows.length) return res.status(404).json({ ok: false, error: 'Not found' });
       const row = rows[0];
-
-      // Authorisation. The stage is read from the DB row, and the actor from the
-      // verified ERP session — `body.by` and `?role=` are ignored entirely.
-      const verdict = canActOnStage(session, row);
-      if (!verdict.ok) return res.status(verdict.status).json({ ok: false, error: verdict.error });
-      if (row.stage === READY) {
-        return res.status(409).json({ ok: false, error: 'Already fully approved — pending posting by Accounts.' });
+      if (row.stage === 'Posted' || row.stage === 'Rejected' || row.stage === READY) {
+        return res.status(400).json({ ok: false, error: row.stage === READY ? 'Already fully approved — pending posting by Accounts.' : ('Already ' + row.stage) });
       }
-      const by = session.name || session.email;
-
+      // stale link guard: the email was for a specific stage; if it has moved on, don't let this approver act on the wrong stage
+      if (STAGES.includes(by) && by !== row.stage) {
+        return res.status(409).json({ ok: false, error: 'You have already approved this — it is now with ' + row.stage + '.' });
+      }
       // optional edited amount applied at this stage
       let edited = row.edited_amount;
       if (body.editedAmount != null && body.editedAmount !== '') edited = Number(body.editedAmount);
@@ -1014,26 +881,13 @@ export default async function handler(req, res) {
       // Audit seal: only the Audit stage can apply it
       const sealed = (row.stage === 'Audit' && (body.auditSeal === true || body.auditSeal === 'true')) ? true : undefined;
       const history = Array.isArray(row.history) ? row.history : [];
-      history.push({ stage: row.stage, action: 'approved', by, byEmail: session.email, byRole: session.role, at: new Date().toISOString(), amount: (edited != null ? Number(edited) : Number(row.amount)), comment, sealed });
+      history.push({ stage: row.stage, action: 'approved', by, at: new Date().toISOString(), amount: (edited != null ? Number(edited) : Number(row.amount)), comment, sealed });
 
-      // Conditional update: only advances if the row is STILL at the stage we
-      // authorised against. Two concurrent approvals cannot both succeed, so a
-      // double-click or a replayed request can no longer skip a stage.
-      const advanced = await sql`UPDATE expenses
+      await sql`UPDATE expenses
         SET stage = ${nextStage}, edited_amount = ${edited}, history = ${JSON.stringify(history)}::jsonb, updated_at = now()
-        WHERE id = ${id} AND stage = ${row.stage}
-        RETURNING id`;
-      if (!advanced.length) {
-        return res.status(409).json({ ok: false, error: 'This expense was just actioned by someone else — reload to see its current stage.' });
-      }
+        WHERE id = ${id}`;
 
       const updated = (await sql`SELECT * FROM expenses WHERE id = ${id}`)[0];
-      await writeAudit(req, session, {
-        expense: updated, action: 'approve',
-        fromStage: row.stage, toStage: nextStage,
-        amount: (edited != null ? Number(edited) : Number(row.amount)),
-        notes: comment || null, override: verdict.override === true,
-      });
 
       let notifyOk;
       if (isFinal) {
@@ -1056,7 +910,7 @@ export default async function handler(req, res) {
 
     // --- setManager: change manager_email of an expense (and re-send if currently at Manager) ---
     if (action === 'setManager') {
-      if (!isAdminRequest(session, req, body)) return res.status(403).json({ ok: false, error: 'Forbidden — an ERP admin session or a valid admin key is required.' });
+      if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });
       const sid = req.query.id || body.id;
       const newEmail = (req.query.email || body.email || '').toString().trim();
       if (!newEmail) return res.status(400).json({ ok: false, error: 'email required' });
@@ -1075,7 +929,7 @@ export default async function handler(req, res) {
 
     // --- edit: admin correction of safe fields on an existing expense ---
     if (action === 'edit') {
-      if (!isAdminRequest(session, req, body)) return res.status(403).json({ ok: false, error: 'Forbidden — an ERP admin session or a valid admin key is required.' });
+      if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });
       const eid = req.query.id || body.id;
       const erows = await sql`SELECT * FROM expenses WHERE id = ${eid}`;
       if (!erows.length) return res.status(404).json({ ok: false, error: 'Not found' });
@@ -1098,7 +952,7 @@ export default async function handler(req, res) {
     // --- fixStage: repair an expense stuck on a stage name that no longer exists in STAGES
     // (e.g. left over from a past rename) by moving it to a valid stage (admin only) ---
     if (action === 'fixStage') {
-      if (!isAdminRequest(session, req, body)) return res.status(403).json({ ok: false, error: 'Forbidden — an ERP admin session or a valid admin key is required.' });
+      if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });
       const fid = req.query.id || body.id;
       const target = (req.query.stage || body.stage || '').toString();
       if (!STAGES.includes(target) && target !== READY) return res.status(400).json({ ok: false, error: 'Bad stage: ' + target });
@@ -1114,7 +968,7 @@ export default async function handler(req, res) {
 
     // --- unreject: recover a Rejected expense back to a chosen stage (admin only) ---
     if (action === 'unreject') {
-      if (!isAdminRequest(session, req, body)) return res.status(403).json({ ok: false, error: 'Forbidden — an ERP admin session or a valid admin key is required.' });
+      if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });
       const uid = req.query.id || body.id;
       const target = (req.query.stage || body.stage || 'Manager').toString();
       if (!STAGES.includes(target)) return res.status(400).json({ ok: false, error: 'Bad stage: ' + target });
@@ -1133,7 +987,7 @@ export default async function handler(req, res) {
 
     // --- delete: permanently remove a test/mistaken submission (admin only) ---
     if (action === 'delete') {
-      if (!isAdminRequest(session, req, body)) return res.status(403).json({ ok: false, error: 'Forbidden — an ERP admin session or a valid admin key is required.' });
+      if (!checkAdminKey(req, body)) return res.status(403).json({ ok: false, error: 'Forbidden' });
       const did = req.query.id || body.id;
       const drows = await sql`SELECT * FROM expenses WHERE id = ${did}`;
       if (!drows.length) return res.status(404).json({ ok: false, error: 'Not found' });
@@ -1145,38 +999,15 @@ export default async function handler(req, res) {
     // --- reject ---
     if (action === 'reject') {
       const id = body.id || req.query.id;
+      const by = body.by || 'approver';
       const reason = body.reason || '';
       const rows = await sql`SELECT * FROM expenses WHERE id = ${id}`;
       if (!rows.length) return res.status(404).json({ ok: false, error: 'Not found' });
       const row = rows[0];
-
-      // Previously this had NO stage guard and NO identity check, so an anonymous
-      // request could flip an already-Posted expense to Rejected.
-      const verdict = canActOnStage(session, row);
-      if (!verdict.ok) return res.status(verdict.status).json({ ok: false, error: verdict.error });
-      if (!reason || !String(reason).trim()) {
-        return res.status(400).json({ ok: false, error: 'A reason is required when rejecting.' });
-      }
-      const by = session.name || session.email;
-
       const history = Array.isArray(row.history) ? row.history : [];
-      history.push({ stage: row.stage, action: 'rejected', by, byEmail: session.email, byRole: session.role, at: new Date().toISOString(), reason });
-
-      const done = await sql`UPDATE expenses
-        SET stage = 'Rejected', history = ${JSON.stringify(history)}::jsonb, updated_at = now()
-        WHERE id = ${id} AND stage = ${row.stage}
-        RETURNING id`;
-      if (!done.length) {
-        return res.status(409).json({ ok: false, error: 'This expense was just actioned by someone else — reload to see its current stage.' });
-      }
-
+      history.push({ stage: row.stage, action: 'rejected', by, at: new Date().toISOString(), reason });
+      await sql`UPDATE expenses SET stage = 'Rejected', history = ${JSON.stringify(history)}::jsonb, updated_at = now() WHERE id = ${id}`;
       const updated = (await sql`SELECT * FROM expenses WHERE id = ${id}`)[0];
-      await writeAudit(req, session, {
-        expense: updated, action: 'reject',
-        fromStage: row.stage, toStage: 'Rejected',
-        amount: Number(row.edited_amount ?? row.amount), notes: String(reason).trim(),
-        override: verdict.override === true,
-      });
       const emR = rejectedEmail(updated);
       await postNotify({ event: 'rejected', expense: updated, stage: 'Rejected', to: toList([updated.employee_email, updated.manager_email]), bcc: BCC_IT, email_subject: emR.subject, email_html: emR.html });
       return res.json({ ok: true, expense: updated });
