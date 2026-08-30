@@ -407,10 +407,10 @@ function notReceivedEmail(e) {
 function submittedConfirmEmail(e) {
   const html = emailHead()
     + '<p style="font-size:15px;margin:0 0 2px">✅ Your expense <b>' + esc(e.ref) + '</b> has been submitted.</p>'
-    + '<p style="font-size:13px;color:#6b7280;margin:0 0 14px">It is now with your <b style="color:#2a6df4">Reporting</b> manager for approval. You will be emailed at every step — no action needed from you.</p>'
+    + '<p style="font-size:13px;color:#6b7280;margin:0 0 14px">It is now with your <b style="color:#2a6df4">Concern Department Head</b> for approval. You will be emailed at every step — no action needed from you.</p>'
     + '<table style="border-collapse:collapse;margin:0 0 14px">' + detailRows(e) + receiptsCell(e) + '</table>'
     + emailFoot();
-  return { subject: 'Your expense ' + e.ref + ' — submitted, now with Reporting', html };
+  return { subject: 'Your expense ' + e.ref + ' — submitted, now with Concern Department Head', html };
 }
 
 async function postWebhook(url, payload) {
