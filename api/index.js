@@ -1,6 +1,12 @@
 // AKSID Expense backend — single serverless function (Vercel + Neon Postgres)
 // Routes by ?action= (or JSON body.action): init | list | get | submit | approve | reject
 import { neon } from '@neondatabase/serverless';
+// Stage 1 identity hardening (2026-09-01): submit now requires an ERP-backed
+// session and derives employee_name/id/email from it. Every other action
+// remains open exactly as it was after the 2026-08-25 revert — the revert's
+// outage risk applied to list/approve/pay/etc., not to submit. Anti-spoofing
+// is the only behaviour change here.
+import { getSession } from './_auth.js';
 
 const sql = neon(process.env.DATABASE_URL);
 
@@ -802,20 +808,43 @@ export default async function handler(req, res) {
       return res.status(200).send(buf);
     }
 
-    // --- submit: create a new expense (from the form / Make / web) ---
+    // --- submit: create a new expense (authenticated ERP users only) ---
+    //
+    // Stage 1 (2026-09-01): identity is DERIVED FROM THE VERIFIED ERP SESSION
+    // and never read from the request body. A crafted request or DevTools
+    // edit that sets employee_name/id/email cannot file an expense under
+    // another employee — those fields are silently ignored.
     if (action === 'submit') {
+      const session = await getSession(req);
+      if (!session) {
+        return res.status(401).json({ ok: false, error: 'Please sign in to submit an expense.', login: '/login.html' });
+      }
+      const employeeName  = session.name    || '';
+      const employeeCode  = session.empCode || '';
+      const employeeEmail = session.email   || '';
+      if (!employeeName || !employeeCode) {
+        return res.status(403).json({ ok: false, error: 'Your ERP account is not linked to an employee record — ask HR to link it before filing expenses.' });
+      }
       const e = body;
       // Guard: without a manager_email the expense would silently sit at "Manager" stage
       // forever with nobody notified (approverEmail() returns '' and postNotify() skips silently).
       if (!e.manager_email || !/.+@.+\..+/.test(String(e.manager_email).trim())) {
         return res.status(400).json({ ok: false, error: 'manager_email is required and must be a valid email address.' });
       }
+      // Cost centre must match a configured DEPARTMENTS entry. Free-text was
+      // previously accepted via the UI's "Others" option, letting anyone
+      // charge to a made-up cost centre.
+      const submittedCC = String(e.cost_center || '').trim();
+      const ccMatch = DEPARTMENTS.find(d => d.label.toLowerCase() === submittedCC.toLowerCase());
+      if (!ccMatch) {
+        return res.status(400).json({ ok: false, error: 'cost_center must be one of the configured departments.' });
+      }
       const inserted = await sql`INSERT INTO expenses
         (employee_name, employee_id, employee_email, employee_phone, cost_center, expense_date, category, category_key, vendor, description, amount, receipt_url, manager_email, stage, history, iou_ref)
-        VALUES (${e.employee_name || ''}, ${e.employee_id || ''}, ${e.employee_email || ''}, ${e.employee_phone || ''}, ${e.cost_center || ''},
+        VALUES (${employeeName}, ${employeeCode}, ${employeeEmail}, ${e.employee_phone || ''}, ${ccMatch.label},
                 ${e.expense_date || null}, ${e.category || ''}, ${e.category_key || null}, ${e.vendor || ''}, ${e.description || ''},
                 ${e.amount || 0}, ${e.receipt_url || ''}, ${e.manager_email || ''}, 'Manager',
-                ${JSON.stringify([{ stage: 'Submitted', at: new Date().toISOString(), by: e.employee_name || '' }])}::jsonb,
+                ${JSON.stringify([{ stage: 'Submitted', at: new Date().toISOString(), by: employeeName }])}::jsonb,
                 ${e.iou_ref || null})
         RETURNING *`;
       const row = inserted[0];
