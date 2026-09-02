@@ -9,6 +9,6 @@ export default async function handler(req, res) {
   if (!s) return res.status(401).json({ ok: false, error: 'Not signed in.' });
   return res.status(200).json({
     ok: true,
-    user: { name: s.name, email: s.email, role: s.role, empCode: s.empCode, department: s.department },
+    user: { name: s.name, email: s.contactEmail || s.email, loginEmail: s.email, role: s.role, empCode: s.empCode, department: s.department },
   });
 }
