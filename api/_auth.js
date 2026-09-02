@@ -72,7 +72,8 @@ export async function getSession(req) {
   try {
     rows = await erpSql`
       SELECT u.id, u.email, u.active, u.token_version, u.employee_id, u.role,
-             e.emp_code, e.full_name, d.name AS department
+             e.emp_code, e.full_name, e.email AS employee_email,
+             d.name AS department
         FROM app_user u
         LEFT JOIN employee e ON e.id = u.employee_id
         LEFT JOIN department d ON d.id = e.department_id
@@ -88,10 +89,23 @@ export async function getSession(req) {
   if (!u.active) return null;
   if ((payload.tv ?? 1) !== u.token_version) return null; // revoked / password changed
 
+  // `email` = login identifier (from app_user.email — used for approval-routing
+  // matching against manager_email). `contactEmail` = the person's real inbox
+  // (from employee.email — used for notifications and stored on expense rows,
+  // falling back to the login only when employee.email is unset).
+  //
+  // Why both: HR-created accounts without a personal email get a placeholder
+  // login of the form `<empcode>@aksidcorp.com`. Before this fix, storing
+  // session.email onto expense rows carried that placeholder into every
+  // downstream email/report; the finance team saw expenses "from"
+  // `240401038@aksidcorp.com` instead of the real address.
+  const loginEmail = String(u.email || '').toLowerCase();
+  const rawContact = String(u.employee_email || '').trim().toLowerCase();
   return {
     userId: Number(u.id),
     employeeId: u.employee_id ? Number(u.employee_id) : null,
-    email: String(u.email || '').toLowerCase(),
+    email: loginEmail,
+    contactEmail: rawContact || loginEmail,
     empCode: u.emp_code || null,
     name: u.full_name || u.email,
     role: u.role || null,

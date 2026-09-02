@@ -821,7 +821,10 @@ export default async function handler(req, res) {
       }
       const employeeName  = session.name    || '';
       const employeeCode  = session.empCode || '';
-      const employeeEmail = session.email   || '';
+      // Prefer the person's real contact email over the login identifier —
+      // login is often a `<empcode>@aksidcorp.com` placeholder for accounts
+      // whose employee record didn't have a personal email at the time.
+      const employeeEmail = session.contactEmail || session.email || '';
       if (!employeeName || !employeeCode) {
         return res.status(403).json({ ok: false, error: 'Your ERP account is not linked to an employee record — ask HR to link it before filing expenses.' });
       }
