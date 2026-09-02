@@ -125,7 +125,7 @@ export async function login(identifier, password) {
 
   const rows = await erpSql`
     SELECT u.id, u.email, u.password_hash, u.active, u.employee_id, u.token_version, u.role,
-           u.failed_attempts, u.locked_until,
+           u.failed_attempts, u.locked_until, u.mfa_enabled,
            e.emp_code, e.full_name
       FROM app_user u
       LEFT JOIN employee e ON e.id = u.employee_id
@@ -139,6 +139,24 @@ export async function login(identifier, password) {
 
   if (u.locked_until && new Date(u.locked_until) > new Date()) {
     return { ok: false, error: 'Account is temporarily locked — try again in a few minutes.' };
+  }
+
+  // MFA enforcement (Stage 3, 2026-09-02): an ERP account with MFA enabled
+  // must NOT be able to authenticate to Expense using password alone —
+  // password-only here would fully defeat their ERP-side second factor.
+  // These accounts get routed to the SSO handoff instead (ERP sign-in +
+  // MFA -> ERP mints token -> Expense /api/sso consumes it). Users without
+  // MFA continue to use password login as before.
+  //
+  // We check BEFORE bcrypt-compare so a correct password on an MFA account
+  // still doesn't return ok:true — same behaviour as an incorrect password
+  // from the caller's perspective, plus a specific hint pointing at SSO.
+  if (u.mfa_enabled) {
+    return {
+      ok: false,
+      error: 'Your ERP account has 2-factor authentication enabled. Please open Expense Tracker from inside the ERP dashboard (sidebar → Expense Tracker) instead of signing in here.',
+      requireSso: true,
+    };
   }
 
   const ok = await bcrypt.compare(password, u.password_hash || '');
