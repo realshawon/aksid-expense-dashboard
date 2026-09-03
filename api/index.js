@@ -60,6 +60,12 @@ const DEPARTMENTS = [
   { label: 'Retail Sales',           tag: 'Head Office' },
   { label: 'Corporate Sales',        tag: 'Head Office' },
   { label: 'Project Sales',          tag: 'Head Office' },
+  // Explicit entry is required, not optional: submissions must match a row here
+  // (see the cost-centre check in the submit handler), and without it the
+  // resolveDeptTag() regex fallback would catch "Management" and route this to
+  // the Management tag. Zoho's Head Office reporting tag has no sales option,
+  // so it maps to Head Office like every other sales department above.
+  { label: 'Sales Management',       tag: 'Head Office' },
   { label: 'Crossgate',              tag: 'Head Office' },
   { label: 'Ortrio',                 tag: 'Head Office' },
   { label: 'Safe Daycare',           tag: 'Head Office' },
